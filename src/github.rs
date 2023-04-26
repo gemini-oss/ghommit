@@ -192,9 +192,17 @@ impl GitHubClient<'_> {
             Err(e) => Err(format!("Request failed: {}", e.to_string()))?,
         };
 
-        match response.json() {
-            Ok(response) => Ok(response),
-            Err(e) => Err(format!("Error occurred while deserializing GraphQL request: {}", e.to_string())),
+        // - Read as text before deserializing to a struct since `.text()` and
+        //   `.json()` are move operations, and `.text()` is more likely to
+        //   succeed
+        let text = match response.text() {
+            Ok(text) => text,
+            Err(e) => Err(format!("Error occurred while reading GraphQL response body as text: {}", e.to_string()))?,
+        };
+
+        match serde_json::from_str(&text) {
+            Ok(typed_result) => typed_result,
+            Err(e) => Err(format!("Error occurred while deserializing GraphQL response: {}: {}", e.to_string(), text)),
         }
     }
 
