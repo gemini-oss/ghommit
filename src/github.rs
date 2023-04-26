@@ -53,10 +53,7 @@ impl GitHubClient<'_> {
     }
 
     fn get_http_client(&self, maybe_timeout_seconds: Option<u64>) -> Result<reqwest::blocking::Client, String> {
-        let timeout_seconds = match maybe_timeout_seconds {
-            Some(timeout_seconds) => timeout_seconds,
-            None => 60,
-        };
+        let timeout_seconds = maybe_timeout_seconds.unwrap_or_else(|| 60);
 
         let maybe_client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(timeout_seconds)).build();
 
@@ -200,10 +197,16 @@ impl GitHubClient<'_> {
             Err(e) => Err(format!("Error occurred while reading GraphQL response body as text: {}", e.to_string()))?,
         };
 
-        match serde_json::from_str(&text) {
+        let data = match serde_json::from_str::<R>(&text) {
             Ok(typed_result) => typed_result,
-            Err(e) => Err(format!("Error occurred while deserializing GraphQL response: {}: {}", e.to_string(), text)),
-        }
+            Err(e) => {
+                let err_str = e.to_string();
+                let type_str = std::any::type_name::<R>();
+                Err(format!("Error occurred while deserializing GraphQL response to {}: {}: {}", type_str, err_str, text))?
+            }
+        };
+
+        Ok(data)
     }
 
     fn does_branch_exist(&self, config: &Config) -> Result<bool, String> {
@@ -392,7 +395,7 @@ pub mod request {
     }
 }
 
-mod response {
+pub mod response {
     use serde::Deserialize;
 
     // > CreateCommitOnBranch

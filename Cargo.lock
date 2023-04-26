@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "ghommit"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.21.0",
  "clap",
