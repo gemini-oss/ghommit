@@ -22,7 +22,7 @@ impl fmt::Display for Config {
         write!(f, "commit_message: \"{}\"", self.commit_message)?;
         write!(f, ", git_branch: \"{}\"", self.git_branch_name)?;
         write!(f, ", git_head_object_id: \"{}\"", self.git_head_object_id)?;
-        write!(f, ", git_repo: Repository {{ {} }}",  self.git_repo.path().to_str().unwrap_or("(unknown)"))?;
+        write!(f, ", git_repo: Repository {{ {} }}", self.git_repo.path().to_str().unwrap_or_else(|| "(unknown)"))?;
         write!(f, ", github_app_id: {}", self.github_app_id)?;
         write!(f, ", github_app_installation_id: {}", self.github_app_installation_id)?;
         write!(f, ", github_app_private_key: EncodingKey {{ ... }} ")?;

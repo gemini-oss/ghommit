@@ -11,8 +11,12 @@ pub struct PathStatus {
 
 pub fn git_status(config: &Config) -> Result<Vec<PathStatus>, String> {
     let repo = &config.git_repo;
-    let index = repo.index().unwrap();
-    let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let index = repo.index()
+        .map_err(|e| format!("Unable to read git index: {}", e.to_string()))?;
+    let head = repo.head()
+        .map_err(|e| format!("Unable to read git head: {}", e.to_string()))?;
+    let head_tree = head.peel_to_tree()
+        .map_err(|e| format!("Unable to peel git head to tree: {}", e.to_string()))?;
 
     let mut diff_options = DiffOptions::new();
     diff_options.include_typechange(true);
@@ -22,7 +26,7 @@ pub fn git_status(config: &Config) -> Result<Vec<PathStatus>, String> {
         Some(&head_tree),
         Some(&index),
         Some(&mut diff_options),
-    ).unwrap();
+    ).map_err(|e| format!("Unable to create diff between head tree and index: {}", e.to_string()))?;
 
     let mut changes: Vec<PathStatus> = vec![];
 
