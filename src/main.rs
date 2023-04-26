@@ -4,12 +4,12 @@ use std::io::Write;
 
 use base64;
 use base64::write::EncoderStringWriter;
-use config::Config;
 use git2;
-use github::{CreateCommitOnBranchInput, CommittableBranch, CommitMessage};
 
+use crate::config::Config;
 use crate::git_status::{git_status, PathStatus};
-use crate::github::{FileAddition, FileChanges, FileDeletion, GitHubClient};
+use crate::github::GitHubClient;
+use crate::github::request::{CreateCommitOnBranchInput, CommittableBranch, CommitMessage, FileAddition, FileChanges, FileDeletion};
 
 mod config;
 mod github;
@@ -145,10 +145,16 @@ fn path_statuses_to_file_changes(status: &Vec<PathStatus>) -> Result<FileChanges
     })
 }
 
-fn commit_via_github_api(github_client: &GitHubClient, config: &Config, file_changes: FileChanges) -> Result<(), String> {
+/// Returns a URL to the commit on GitHub.
+fn commit_via_github_api(github_client: &GitHubClient, config: &Config, file_changes: FileChanges) -> Result<String, String> {
+    let repo_owner = &config.github_repo_owner;
+    let repo_name = &config.github_repo_name;
+
+    let repo_owner_and_name = format!("{}/{}", repo_owner, repo_name);
+
     let args = CreateCommitOnBranchInput {
         branch: CommittableBranch {
-            repository_name_with_owner: config.github_owner_and_repo.clone(),
+            repository_name_with_owner: repo_owner_and_name,
             branch_name: config.git_branch_name.clone(),
         },
         client_mutation_id: None,
@@ -160,12 +166,10 @@ fn commit_via_github_api(github_client: &GitHubClient, config: &Config, file_cha
         }
     };
 
-    let result = github_client.create_commit_on_branch(args);
-
-    result
+    github_client.create_commit_on_branch(config, args)
 }
 
-fn ghommit() -> Result<(), String> {
+fn ghommit() -> Result<String, String> {
     let maybe_repo = git2::Repository::open(".");
     let config = config::Config::gather_config(maybe_repo)?;
 
@@ -179,19 +183,22 @@ fn ghommit() -> Result<(), String> {
         github_app_private_key: &config.github_app_private_key,
     };
 
-    let _result = commit_via_github_api(&github_client, &config, file_changes)?;
+    let commit_url = commit_via_github_api(&github_client, &config, file_changes)?;
 
-    Ok(())
+    Ok(commit_url)
 }
 
 fn main() -> Result<(), String> {
     // Match so that Strings in an Err can be pulled out and printed without
     // the Err wrapping so newlines aren't escaped
     match ghommit() {
-        Ok(_) => Ok(()),
+        Ok(commit_url) => {
+            println!("Commit created: {}", commit_url);
+            Ok(())
+        }
         Err(e) => {
             eprintln!("{}", e);
             std::process::exit(1)
-        },
+        }
     }
 }

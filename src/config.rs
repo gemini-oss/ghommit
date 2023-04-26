@@ -12,7 +12,8 @@ pub struct Config {
     pub github_app_id: u64,
     pub github_app_installation_id: u64,
     pub github_app_private_key: EncodingKey,
-    pub github_owner_and_repo: String,
+    pub github_repo_owner: String,
+    pub github_repo_name: String,
 }
 
 impl fmt::Display for Config {
@@ -25,7 +26,8 @@ impl fmt::Display for Config {
         write!(f, ", github_app_id: {}", self.github_app_id)?;
         write!(f, ", github_app_installation_id: {}", self.github_app_installation_id)?;
         write!(f, ", github_app_private_key: EncodingKey {{ ... }} ")?;
-        write!(f, ", github_owner_and_repo: \"{}\"", self.github_owner_and_repo)?;
+        write!(f, ", github_repo_owner: \"{}\"", self.github_repo_owner)?;
+        write!(f, ", github_repo_name: \"{}\"", self.github_repo_name)?;
         write!(f, " }}")?;
         Ok(())
     }
@@ -35,7 +37,7 @@ impl fmt::Display for Config {
 #[derive(Debug)]
 #[derive(clap::Parser)]
 #[command(name = "ghommit")]
-struct CommandLineArguments {
+struct CommandLineArgumentsRaw {
     /// GitHub owner and repo name in $OWNER/$REPO_NAME format
     #[arg(long, required = true)]
     github_owner_and_repo: String,
@@ -43,6 +45,12 @@ struct CommandLineArguments {
     /// Commit message
     #[arg(long, short, required = true)]
     message: String,
+}
+
+struct CommandLineArguments {
+    github_repo_owner: String,
+    github_repo_name: String,
+    commit_message: String,
 }
 
 struct GitConfig {
@@ -53,9 +61,24 @@ struct GitConfig {
 
 impl Config {
     fn command_line_arguments() -> Result<CommandLineArguments, String> {
-        match CommandLineArguments::try_parse() {
-            Ok(res) => Ok(res),
-            Err(e) => Err(e.to_string()),
+        let raw_args = match CommandLineArgumentsRaw::try_parse() {
+            Ok(res) => res,
+            Err(e) => Err(e.to_string())?,
+        };
+
+        let repo_and_owner_split: Vec<&str> = raw_args.github_owner_and_repo.split('/').collect();
+
+        match repo_and_owner_split.as_slice() {
+            [owner, repo_name] => {
+                Ok(CommandLineArguments {
+                    github_repo_owner: owner.to_string(),
+                    github_repo_name: repo_name.to_string(),
+                    commit_message: raw_args.message,
+                })
+            }
+            _ => {
+                Err(format!("Expected --github-owner-and-repo in $REPO/$OWNER, but found {}", raw_args.github_owner_and_repo))
+            }
         }
     }
 
@@ -132,14 +155,15 @@ impl Config {
         let github_app_private_key_pem_data = Self::environment_variable_rsa_private_key("GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA")?;
 
         Ok(Config {
-            commit_message: cli_args.message,
+            commit_message: cli_args.commit_message,
             git_branch_name: git_config.branch_name,
             git_head_object_id: git_config.git_head_object_id,
             git_repo: git_config.repository,
             github_app_id: github_app_id,
             github_app_installation_id: github_app_installation_id,
             github_app_private_key: github_app_private_key_pem_data,
-            github_owner_and_repo: cli_args.github_owner_and_repo,
+            github_repo_owner: cli_args.github_repo_owner,
+            github_repo_name: cli_args.github_repo_name,
         })
     }
 }
