@@ -5,6 +5,7 @@ use std::io::Write;
 use base64;
 use base64::write::EncoderStringWriter;
 use git2;
+use once_cell::sync::Lazy;
 
 use crate::config::Config;
 use crate::git_status::{git_status, PathStatus};
@@ -24,28 +25,41 @@ enum GitCommitAction {
     Unsupported,
 }
 
-fn delta_to_actions(git2_delta: git2::Delta) -> HashSet<GitCommitAction> {
-    fn set(actions: &[GitCommitAction]) -> HashSet<GitCommitAction> {
-        actions.iter().cloned().collect()
-    }
+fn delta_to_actions(git2_delta: git2::Delta) -> &'static HashSet<GitCommitAction> {
+    static ADD_PATH: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
+        GitCommitAction::AddPath,
+    ]));
+    static ADD_PATH_AND_DELETE_ORIGINAL_PATH: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
+        GitCommitAction::AddPath,
+        GitCommitAction::DeleteOriginalPath,
+    ]));
+    static DELETE_PATH: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
+        GitCommitAction::DeletePath,
+    ]));
+    static NOP: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
+        GitCommitAction::NOP,
+    ]));
+    static UNSUPPORTED: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
+        GitCommitAction::Unsupported,
+    ]));
 
     match git2_delta {
         // Add path
-        git2::Delta::Modified => set(&[GitCommitAction::AddPath]),
-        git2::Delta::Added => set(&[GitCommitAction::AddPath]),
-        git2::Delta::Copied => set(&[GitCommitAction::AddPath]),
-        git2::Delta::Typechange => set(&[GitCommitAction::AddPath]),
+        git2::Delta::Modified => &ADD_PATH,
+        git2::Delta::Added => &ADD_PATH,
+        git2::Delta::Copied => &ADD_PATH,
+        git2::Delta::Typechange => &ADD_PATH,
         // Add path and delete original path
-        git2::Delta::Renamed => set(&[GitCommitAction::AddPath, GitCommitAction::DeleteOriginalPath]),
+        git2::Delta::Renamed => &ADD_PATH_AND_DELETE_ORIGINAL_PATH,
         // Delete path
-        git2::Delta::Deleted => set(&[GitCommitAction::DeletePath]),
-        // NOPs
-        git2::Delta::Unmodified => set(&[GitCommitAction::NOP]),
-        git2::Delta::Ignored => set(&[GitCommitAction::NOP]),
-        git2::Delta::Untracked => set(&[GitCommitAction::NOP]),
+        git2::Delta::Deleted => &DELETE_PATH,
+        // // NOPs
+        git2::Delta::Unmodified => &NOP,
+        git2::Delta::Ignored => &NOP,
+        git2::Delta::Untracked => &NOP,
         // Unsupported
-        git2::Delta::Unreadable => set(&[GitCommitAction::Unsupported]),
-        git2::Delta::Conflicted => set(&[GitCommitAction::Unsupported]),
+        git2::Delta::Unreadable => &UNSUPPORTED,
+        git2::Delta::Conflicted => &UNSUPPORTED,
     }
 }
 

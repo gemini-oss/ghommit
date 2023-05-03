@@ -291,6 +291,7 @@ dependencies = [
  "clap",
  "git2",
  "jsonwebtoken",
+ "once_cell",
  "reqwest",
  "serde",
  "serde_json",
