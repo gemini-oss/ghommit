@@ -335,21 +335,18 @@ pub mod rest_api {
                 pub tree: Vec<TreeNode>,
             }
 
-            #[derive(Debug)]
-            pub struct FileMode {
-                pub file_mode: git2::FileMode,
-            }
-
-            impl Serialize for FileMode {
-                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-                where
-                    S: Serializer
-                {
-                    let raw_mode = u32::from(self.file_mode);
-                    let string = format!("{:0>6o}", raw_mode);
-
-                    serializer.serialize_str(&string)
-                }
+            #[derive(Debug, Serialize)]
+            pub enum FileMode {
+                #[serde(rename = "100644")]
+                Blob,
+                #[serde(rename = "100755")]
+                BlobExecutable,
+                #[serde(rename = "160000")]
+                Commit,
+                #[serde(rename = "120000")]
+                Link,
+                #[serde(rename = "040000")]
+                Tree,
             }
 
             #[derive(Debug, Serialize)]
@@ -371,7 +368,7 @@ pub mod rest_api {
             #[derive(Debug)]
             pub struct TreeNode {
                 pub path: String,
-                pub mode: FileMode,
+                pub file_mode: FileMode,
                 pub node_type: NodeType,
                 pub sha_or_content: ShaOrContent,
             }
@@ -387,7 +384,7 @@ pub mod rest_api {
                     let mut state = serializer.serialize_struct("TreeNode", 4)?;
 
                     state.serialize_field("path", &self.path)?;
-                    state.serialize_field("mode", &self.mode)?;
+                    state.serialize_field("mode", &self.file_mode)?;
                     state.serialize_field("type", &self.node_type)?;
 
                     match &self.sha_or_content {
@@ -630,17 +627,18 @@ mod create_a_tree_tests {
     use super::test_util::{assert_eq_deserialized, quote};
 
     fn manual_file_mode_to_json_string(file_mode: &FileMode) -> String {
-        let raw_octal = match file_mode.file_mode {
-            git2::FileMode::Blob => "100644",
-            git2::FileMode::BlobGroupWritable => "100664",
-            git2::FileMode::BlobExecutable => "100755",
-            git2::FileMode::Commit => "160000",
-            git2::FileMode::Link => "120000",
-            git2::FileMode::Tree => "040000",
-            git2::FileMode::Unreadable => "000000",
+        let git2_file_mode = match file_mode {
+            FileMode::Blob => git2::FileMode::Blob,
+            FileMode::BlobExecutable => git2::FileMode::BlobExecutable,
+            FileMode::Commit => git2::FileMode::Commit,
+            FileMode::Link => git2::FileMode::Link,
+            FileMode::Tree => git2::FileMode::Tree,
         };
 
-        quote(raw_octal)
+        let raw_mode_u32 = u32::from(git2_file_mode);
+        let raw_mode_str = format!("{:0>6o}", raw_mode_u32);
+
+        quote(&raw_mode_str)
     }
 
     fn manual_node_type_to_json_string(node_type: &NodeType) -> &'static str {
@@ -697,23 +695,27 @@ mod create_a_tree_tests {
 
     #[test]
     fn file_mode_serialization() {
-        let git2_file_modes = vec![
-            git2::FileMode::Blob,
-            git2::FileMode::BlobGroupWritable,
-            git2::FileMode::BlobExecutable,
-            git2::FileMode::Commit,
-            git2::FileMode::Link,
-            git2::FileMode::Tree,
-            git2::FileMode::Unreadable,
+        let file_modes = vec![
+            FileMode::Blob,
+            FileMode::BlobExecutable,
+            FileMode::Commit,
+            FileMode::Link,
         ];
 
-        for git2_file_mode in git2_file_modes {
-            let file_mode = FileMode {
-                file_mode: git2_file_mode,
+        for file_mode in file_modes {
+            let git2_file_mode = match file_mode {
+                FileMode::Blob => git2::FileMode::Blob,
+                FileMode::BlobExecutable => git2::FileMode::BlobExecutable,
+                FileMode::Commit => git2::FileMode::Commit,
+                FileMode::Link => git2::FileMode::Link,
+                FileMode::Tree => git2::FileMode::Tree,
             };
 
+            let raw_mode = u32::from(git2_file_mode);
+            let expected_raw = format!("{:0>6o}", raw_mode);
+
             let actual = serde_json::to_string(&file_mode).unwrap();
-            let expected = manual_file_mode_to_json_string(&file_mode);
+            let expected = quote(&expected_raw);
 
             assert_eq!(actual, expected);
         }
@@ -722,7 +724,7 @@ mod create_a_tree_tests {
     #[test]
     fn tree_node_serialization_with_content() {
         let path = "hello_world.txt";
-        let mode = FileMode { file_mode: git2::FileMode::Blob };
+        let mode = FileMode::Blob;
         let node_type = NodeType::Blob;
         let content = ShaOrContent::Content("hello world\n".to_owned());
 
@@ -730,7 +732,7 @@ mod create_a_tree_tests {
 
         let tree_node = TreeNode {
             path: path.to_owned(),
-            mode: mode,
+            file_mode: mode,
             node_type: node_type,
             sha_or_content: content,
         };
@@ -743,7 +745,7 @@ mod create_a_tree_tests {
     #[test]
     fn tree_node_serialization_with_sha() {
         let path = "hello_world.txt";
-        let mode = FileMode { file_mode: git2::FileMode::Blob };
+        let mode = FileMode::Blob;
         let node_type = NodeType::Blob;
         let sha = ShaOrContent::Sha(Some("0000000000000000000000000000000000000000".to_owned()));
 
@@ -751,7 +753,7 @@ mod create_a_tree_tests {
 
         let tree_node = TreeNode {
             path: path.to_owned(),
-            mode: mode,
+            file_mode: mode,
             node_type: node_type,
             sha_or_content: sha,
         };
@@ -764,7 +766,7 @@ mod create_a_tree_tests {
     #[test]
     fn tree_node_serialization_with_no_sha() {
         let path = "hello_world.txt";
-        let mode = FileMode { file_mode: git2::FileMode::Unreadable };
+        let mode = FileMode::Blob;
         let node_type = NodeType::Blob;
         let sha = ShaOrContent::Sha(None);
 
@@ -772,7 +774,7 @@ mod create_a_tree_tests {
 
         let tree_node = TreeNode {
             path: path.to_owned(),
-            mode: mode,
+            file_mode: mode,
             node_type: node_type,
             sha_or_content: sha,
         };
@@ -815,7 +817,7 @@ mod create_a_tree_tests {
             tree: vec![
                 TreeNode {
                     path: "file.rb".to_owned(),
-                    mode: FileMode { file_mode: git2::FileMode::Blob },
+                    file_mode: FileMode::Blob,
                     node_type: NodeType::Blob,
                     sha_or_content: ShaOrContent::Sha(Some("44b4fc6d56897b048c772eb4087f854f46256132".to_owned())),
                 }
