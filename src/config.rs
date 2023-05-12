@@ -9,6 +9,7 @@ pub struct Config {
     pub git_branch_name: String,
     pub git_head_object_id: String,
     pub git_repo: Repository,
+    pub git_should_force_push: bool,
     pub github_app_id: u64,
     pub github_app_installation_id: u64,
     pub github_app_private_key: EncodingKey,
@@ -23,6 +24,7 @@ impl fmt::Display for Config {
         write!(f, ", git_branch: \"{}\"", self.git_branch_name)?;
         write!(f, ", git_head_object_id: \"{}\"", self.git_head_object_id)?;
         write!(f, ", git_repo: Repository {{ {} }}", self.git_repo.path().to_str().unwrap_or_else(|| "(unknown)"))?;
+        write!(f, ", git_should_force_push: {}", self.git_should_force_push)?;
         write!(f, ", github_app_id: {}", self.github_app_id)?;
         write!(f, ", github_app_installation_id: {}", self.github_app_installation_id)?;
         write!(f, ", github_app_private_key: EncodingKey {{ ... }} ")?;
@@ -45,12 +47,18 @@ struct CommandLineArgumentsRaw {
     /// Commit message
     #[arg(long, short, required = true)]
     message: String,
+
+    /// Force push
+    #[arg(long, short, default_value = "false")]
+    force: bool,
 }
 
+#[derive(Debug)]
 struct CommandLineArguments {
+    commit_message: String,
+    git_should_force_push: bool,
     github_repo_owner: String,
     github_repo_name: String,
-    commit_message: String,
 }
 
 struct GitConfig {
@@ -71,9 +79,10 @@ impl Config {
         match repo_and_owner_split.as_slice() {
             [owner, repo_name] => {
                 Ok(CommandLineArguments {
+                    commit_message: raw_args.message,
+                    git_should_force_push: raw_args.force,
                     github_repo_owner: owner.to_string(),
                     github_repo_name: repo_name.to_string(),
-                    commit_message: raw_args.message,
                 })
             }
             _ => {
@@ -159,6 +168,7 @@ impl Config {
             git_branch_name: git_config.branch_name,
             git_head_object_id: git_config.git_head_object_id,
             git_repo: git_config.repository,
+            git_should_force_push: cli_args.git_should_force_push,
             github_app_id: github_app_id,
             github_app_installation_id: github_app_installation_id,
             github_app_private_key: github_app_private_key_pem_data,
