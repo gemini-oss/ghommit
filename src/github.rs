@@ -296,6 +296,90 @@ impl GitHubClient<'_> {
     }
 }
 
+pub mod rest_api {
+    pub mod request {
+
+        /// [Create a Tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
+        ///
+        /// The entirety of GitHub's trees API uses snake case, so serde
+        /// renaming is only necessary for enum variants that derive `Serialize`
+        pub mod create_a_tree {
+            use serde::{Serialize, Serializer};
+            use serde::ser::SerializeStruct;
+
+            #[derive(Debug, Serialize)]
+            pub struct CreateATree {
+                pub base_tree: String,
+                pub tree: Vec<TreeNode>,
+            }
+
+            #[derive(Debug)]
+            pub struct FileMode {
+                pub file_mode: git2::FileMode,
+            }
+
+            impl Serialize for FileMode {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: Serializer
+                {
+                    let raw_mode = u32::from(self.file_mode);
+                    let string = format!("{:0>6o}", raw_mode);
+
+                    serializer.serialize_str(&string)
+                }
+            }
+
+            #[derive(Debug, Serialize)]
+            #[serde(rename_all = "lowercase")]
+            pub enum NodeType {
+                Blob,
+                Commit,
+                Tree,
+            }
+
+            // - Since `TreeNode` needs to manually implement serialization for
+            //   this type, there is no need for anything serde-related
+            #[derive(Debug)]
+            pub enum ShaOrContent {
+                Content(String),
+                Sha(Option<String>),
+            }
+
+            #[derive(Debug)]
+            pub struct TreeNode {
+                pub path: String,
+                pub mode: FileMode,
+                pub node_type: NodeType,
+                pub sha_or_content: ShaOrContent,
+            }
+
+            // - Since `sha_or_content` needs to serialize to one and only one
+            //   of `sha` or `content`, which serde doesn't support, serialize
+            //   must be implemented manually
+            impl Serialize for TreeNode {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: Serializer
+                {
+                    let mut state = serializer.serialize_struct("TreeNode", 4)?;
+
+                    state.serialize_field("path", &self.path)?;
+                    state.serialize_field("mode", &self.mode)?;
+                    state.serialize_field("type", &self.node_type)?;
+
+                    match &self.sha_or_content {
+                        ShaOrContent::Sha(sha) => state.serialize_field("sha", sha)?,
+                        ShaOrContent::Content(content) => state.serialize_field("content", content)?,
+                    };
+
+                    state.end()
+                }
+            }
+        }
+    }
+}
+
 pub mod request {
     use serde::Serialize;
 
@@ -456,5 +540,222 @@ pub mod response {
     #[derive(Debug, Deserialize)]
     pub struct GitHubAccessToken {
         pub token: String,
+    }
+}
+
+#[cfg(test)]
+mod create_a_tree_tests {
+    use serde_json::Value;
+
+    use super::rest_api::request::create_a_tree::{CreateATree, FileMode, NodeType, ShaOrContent, TreeNode};
+
+    /// Serialized strings may not have the same order, so deserialize and
+    /// compare
+    fn assert_eq_deserialized(a: &str, b: &str) {
+        let a_deserialized: Value = serde_json::from_str(&a).unwrap();
+        let b_deserialized: Value = serde_json::from_str(&b).unwrap();
+
+        assert_eq!(a_deserialized, b_deserialized)
+    }
+
+    fn quote(s: &str) -> String {
+        format!("\"{}\"", s)
+    }
+
+    fn manual_file_mode_to_json_string(file_mode: &FileMode) -> String {
+        let raw_octal = match file_mode.file_mode {
+            git2::FileMode::Blob => "100644",
+            git2::FileMode::BlobGroupWritable => "100664",
+            git2::FileMode::BlobExecutable => "100755",
+            git2::FileMode::Commit => "160000",
+            git2::FileMode::Link => "120000",
+            git2::FileMode::Tree => "040000",
+            git2::FileMode::Unreadable => "000000",
+        };
+
+        format!("\"{}\"", raw_octal)
+    }
+
+    fn manual_node_type_to_json_string(node_type: &NodeType) -> &'static str {
+        match node_type {
+            NodeType::Blob => "\"blob\"",
+            NodeType::Commit => "\"commit\"",
+            NodeType::Tree => "\"tree\"",
+        }
+    }
+
+    /// Note: This is not all-encompassing as it only covers the two-character
+    /// escape sequences as outlined in
+    /// [the JSON spec](https://www.rfc-editor.org/rfc/rfc7159#section-7).
+    fn manual_str_to_json_string(s: &str) -> String {
+        let s = s
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\u{0008}", "\\b")
+            .replace("\u{000C}", "\\f")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t");
+        format!("\"{}\"", s)
+    }
+
+    fn manual_tree_node_to_json_string(path: &str, mode: &FileMode, node_type: &NodeType, sha_or_content: &ShaOrContent) -> String {
+        let path_json_str = quote(path);
+        let node_type_json_str = manual_node_type_to_json_string(&node_type);
+        let mode_json_str = manual_file_mode_to_json_string(mode);
+
+        let (sha_or_content_key, sha_or_content_value) = match sha_or_content {
+            ShaOrContent::Content(content) => {
+                ("content", manual_str_to_json_string(content))
+            },
+            ShaOrContent::Sha(maybe_sha) => {
+                let value = match maybe_sha {
+                    Some(sha) => manual_str_to_json_string(sha),
+                    None => "null".to_owned(),
+                };
+
+                ("sha", value)
+            },
+        };
+
+        format!(
+            "{{{}:{},{}:{},{}:{},{}:{}}}",
+            quote("path"), path_json_str,
+            quote("mode"), mode_json_str,
+            quote("type"), node_type_json_str,
+            quote(sha_or_content_key), sha_or_content_value
+        )
+    }
+
+    #[test]
+    fn file_mode_serialization() {
+        let git2_file_modes = vec![
+            git2::FileMode::Blob,
+            git2::FileMode::BlobGroupWritable,
+            git2::FileMode::BlobExecutable,
+            git2::FileMode::Commit,
+            git2::FileMode::Link,
+            git2::FileMode::Tree,
+            git2::FileMode::Unreadable,
+        ];
+
+        for git2_file_mode in git2_file_modes {
+            let file_mode = FileMode {
+                file_mode: git2_file_mode,
+            };
+
+            let actual = serde_json::to_string(&file_mode).unwrap();
+            let expected = manual_file_mode_to_json_string(&file_mode);
+
+            assert_eq!(actual, expected)
+        }
+    }
+
+    #[test]
+    fn tree_node_serialization_with_content() {
+        let path = "hello_world.txt";
+        let mode = FileMode { file_mode: git2::FileMode::Blob };
+        let node_type = NodeType::Blob;
+        let content = ShaOrContent::Content("hello world\n".to_owned());
+
+        let expected = manual_tree_node_to_json_string(path, &mode, &node_type, &content);
+
+        let tree_node = TreeNode {
+            path: path.to_owned(),
+            mode: mode,
+            node_type: node_type,
+            sha_or_content: content,
+        };
+
+        let actual = serde_json::to_string(&tree_node).unwrap();
+
+        assert_eq_deserialized(&actual, &expected)
+    }
+
+    #[test]
+    fn tree_node_serialization_with_sha() {
+        let path = "hello_world.txt";
+        let mode = FileMode { file_mode: git2::FileMode::Blob };
+        let node_type = NodeType::Blob;
+        let sha = ShaOrContent::Sha(Some("0000000000000000000000000000000000000000".to_owned()));
+
+        let expected = manual_tree_node_to_json_string(path, &mode, &node_type, &sha);
+
+        let tree_node = TreeNode {
+            path: path.to_owned(),
+            mode: mode,
+            node_type: node_type,
+            sha_or_content: sha,
+        };
+
+        let actual = serde_json::to_string(&tree_node).unwrap();
+
+        assert_eq_deserialized(&actual, &expected)
+    }
+
+    #[test]
+    fn tree_node_serialization_with_no_sha() {
+        let path = "hello_world.txt";
+        let mode = FileMode { file_mode: git2::FileMode::Unreadable };
+        let node_type = NodeType::Blob;
+        let sha = ShaOrContent::Sha(None);
+
+        let expected = manual_tree_node_to_json_string(path, &mode, &node_type, &sha);
+
+        let tree_node = TreeNode {
+            path: path.to_owned(),
+            mode: mode,
+            node_type: node_type,
+            sha_or_content: sha,
+        };
+
+        let actual = serde_json::to_string(&tree_node).unwrap();
+
+        assert_eq_deserialized(&actual, &expected)
+    }
+
+    #[test]
+    fn node_type_serialization() {
+        let types = vec![
+            NodeType::Blob,
+            NodeType::Commit,
+            NodeType::Tree,
+        ];
+
+        for type_ in types {
+            // - Match so that if new variants are introduced, compilation will
+            //   fail for not being exhaustive
+            let expected = match type_ {
+                NodeType::Blob => quote("blob"),
+                NodeType::Commit => quote("commit"),
+                NodeType::Tree => quote("tree"),
+            };
+
+            let actual = serde_json::to_string(&type_).unwrap();
+
+            assert_eq_deserialized(&actual, &expected)
+        }
+    }
+
+    #[test]
+    fn create_a_tree_serialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree
+        let expected = r#"{"base_tree":"9fb037999f264ba9a7fc6274d15fa3ae2ab98312","tree":[{"path":"file.rb","mode":"100644","type":"blob","sha":"44b4fc6d56897b048c772eb4087f854f46256132"}]}"#;
+
+        let actual_payload  = CreateATree {
+            base_tree: "9fb037999f264ba9a7fc6274d15fa3ae2ab98312".to_owned(),
+            tree: vec![
+                TreeNode {
+                    path: "file.rb".to_owned(),
+                    mode: FileMode { file_mode: git2::FileMode::Blob },
+                    node_type: NodeType::Blob,
+                    sha_or_content: ShaOrContent::Sha(Some("44b4fc6d56897b048c772eb4087f854f46256132".to_owned())),
+                }
+            ],
+        };
+
+        let actual = serde_json::to_string(&actual_payload).unwrap();
+
+        assert_eq_deserialized(&actual, expected)
     }
 }
