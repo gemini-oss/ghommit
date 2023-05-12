@@ -26,20 +26,23 @@ struct Claims {
 }
 
 mod custom_header {
+    use once_cell::sync::Lazy;
     use reqwest::header::HeaderName;
 
     // Note: Header names must be lowercase or reqwest will panic
-    pub const X_GITHUB_API_VERSION: HeaderName = HeaderName::from_static("x-github-api-version");
+    pub static X_GITHUB_API_VERSION: Lazy<HeaderName> = Lazy::new(|| {
+        HeaderName::from_static("x-github-api-version")
+    });
 }
 
 enum GitHubApiType {
     GraphQL,
-    REST,
+    Rest,
 }
 
 enum AuthorizationTokenType {
     AccessToken,
-    JWT,
+    Jwt,
 }
 
 impl GitHubClient<'_> {
@@ -53,7 +56,7 @@ impl GitHubClient<'_> {
     }
 
     fn get_http_client(&self, maybe_timeout_seconds: Option<u64>) -> Result<reqwest::blocking::Client, String> {
-        let timeout_seconds = maybe_timeout_seconds.unwrap_or_else(|| 60);
+        let timeout_seconds = maybe_timeout_seconds.unwrap_or(60);
 
         let maybe_client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(timeout_seconds)).build();
 
@@ -78,11 +81,11 @@ impl GitHubClient<'_> {
             iss: self.github_app_id.to_string(),
         };
 
-        let maybe_jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &self.github_app_private_key);
+        let maybe_jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, self.github_app_private_key);
 
         match maybe_jwt {
             Ok(jwt) => Ok(jwt),
-            Err(e) => Err(format!("Unable to create JWT: {}", e.to_string())),
+            Err(e) => Err(format!("Unable to create JWT: {}", e)),
         }
     }
 
@@ -90,7 +93,7 @@ impl GitHubClient<'_> {
     fn get_access_token(&self) -> Result<String, String> {
         let url = format!("{}/app/installations/{}/access_tokens", REST_API_BASE_URL, self.github_app_installation_id);
 
-        let response = self.make_api_request::<()>(&url, None, Some(AuthorizationTokenType::JWT))?;
+        let response = self.make_api_request::<()>(&url, None, Some(AuthorizationTokenType::Jwt))?;
 
         let status_code = response.status();
 
@@ -115,7 +118,7 @@ impl GitHubClient<'_> {
     fn base_headers(&self, api_type: GitHubApiType, auth_token_type: AuthorizationTokenType) -> Result<HeaderMap, String> {
         let token_str = match auth_token_type {
             AuthorizationTokenType::AccessToken => self.get_access_token()?,
-            AuthorizationTokenType::JWT => self.get_jwt()?,
+            AuthorizationTokenType::Jwt => self.get_jwt()?,
         };
 
         let auth_header_value = match HeaderValue::from_str(&format!("Bearer {}", token_str)) {
@@ -125,7 +128,7 @@ impl GitHubClient<'_> {
 
         let accept_header_value = match api_type {
             GitHubApiType::GraphQL => HeaderValue::from_static("application/json"),
-            GitHubApiType::REST => HeaderValue::from_static("application/vnd.github+json"),
+            GitHubApiType::Rest => HeaderValue::from_static("application/vnd.github+json"),
         };
 
         let mut headers = HeaderMap::new();
@@ -147,9 +150,9 @@ impl GitHubClient<'_> {
 
         match api_type {
             GitHubApiType::GraphQL => {}
-            GitHubApiType::REST => {
+            GitHubApiType::Rest => {
                 headers.insert(
-                    custom_header::X_GITHUB_API_VERSION,
+                    &*custom_header::X_GITHUB_API_VERSION,
                     HeaderValue::from_static("2022-11-28"),
                 );
             }
@@ -165,7 +168,7 @@ impl GitHubClient<'_> {
         };
 
         let http_client = self.get_http_client(None)?;
-        let headers = self.base_headers(GitHubApiType::REST, auth_token_type)?;
+        let headers = self.base_headers(GitHubApiType::Rest, auth_token_type)?;
         let request = http_client.post(url).headers(headers);
 
         let request = match json {
@@ -175,7 +178,7 @@ impl GitHubClient<'_> {
 
         match request.send() {
             Ok(response) => Ok(response),
-            Err(e) => Err(format!("Request failed: {}", e.to_string())),
+            Err(e) => Err(format!("Request failed: {}", e)),
         }
     }
 
@@ -186,7 +189,7 @@ impl GitHubClient<'_> {
 
         let response = match request.send() {
             Ok(response) => response,
-            Err(e) => Err(format!("Request failed: {}", e.to_string()))?,
+            Err(e) => Err(format!("Request failed: {}", e))?,
         };
 
         // - Read as text before deserializing to a struct since `.text()` and
@@ -194,7 +197,7 @@ impl GitHubClient<'_> {
         //   succeed
         let text = match response.text() {
             Ok(text) => text,
-            Err(e) => Err(format!("Error occurred while reading GraphQL response body as text: {}", e.to_string()))?,
+            Err(e) => Err(format!("Error occurred while reading GraphQL response body as text: {}", e))?,
         };
 
         let data = match serde_json::from_str::<R>(&text) {

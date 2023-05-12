@@ -23,7 +23,7 @@ impl fmt::Display for Config {
         write!(f, "commit_message: \"{}\"", self.commit_message)?;
         write!(f, ", git_branch: \"{}\"", self.git_branch_name)?;
         write!(f, ", git_head_object_id: \"{}\"", self.git_head_object_id)?;
-        write!(f, ", git_repo: Repository {{ {} }}", self.git_repo.path().to_str().unwrap_or_else(|| "(unknown)"))?;
+        write!(f, ", git_repo: Repository {{ {} }}", self.git_repo.path().to_str().unwrap_or("(unknown)"))?;
         write!(f, ", git_should_force_push: {}", self.git_should_force_push)?;
         write!(f, ", github_app_id: {}", self.github_app_id)?;
         write!(f, ", github_app_installation_id: {}", self.github_app_installation_id)?;
@@ -163,6 +163,7 @@ impl Config {
         let github_app_installation_id = Self::environment_variable_u64("GHOMMIT_GITHUB_APP_INSTALLATION_ID")?;
         let github_app_private_key_pem_data = Self::environment_variable_rsa_private_key("GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA")?;
 
+        #[allow(clippy::redundant_field_names)]
         Ok(Config {
             commit_message: cli_args.commit_message,
             git_branch_name: git_config.branch_name,

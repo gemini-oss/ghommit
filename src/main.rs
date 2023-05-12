@@ -1,10 +1,10 @@
+#![allow(clippy::redundant_field_names)]
+
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 
-use base64;
 use base64::write::EncoderStringWriter;
-use git2;
 use once_cell::sync::Lazy;
 
 use crate::config::Config;
@@ -21,7 +21,7 @@ enum GitCommitAction {
     AddPath,
     DeleteOriginalPath,
     DeletePath,
-    NOP,
+    Nop,
     Unsupported,
 }
 
@@ -37,7 +37,7 @@ fn delta_to_actions(git2_delta: git2::Delta) -> &'static HashSet<GitCommitAction
         GitCommitAction::DeletePath,
     ]));
     static NOP: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
-        GitCommitAction::NOP,
+        GitCommitAction::Nop,
     ]));
     static UNSUPPORTED: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
         GitCommitAction::Unsupported,
@@ -99,7 +99,7 @@ fn path_statuses_to_file_changes(status: &Vec<PathStatus>) -> Result<FileChanges
         // Files both added and deleted
         let intersection: HashSet<_> = additions_set.intersection(&deletions_set).collect();
 
-        if intersection.len() > 0 {
+        if !intersection.is_empty() {
             Err(format!("Some files were added and deleted: {:?}", intersection))?
         }
 
@@ -143,7 +143,7 @@ fn path_statuses_to_file_changes(status: &Vec<PathStatus>) -> Result<FileChanges
 
                     deletions.push(file_deletion);
                 },
-                GitCommitAction::NOP => {},
+                GitCommitAction::Nop => {},
                 GitCommitAction::Unsupported => {
                     Err(format!("Unsupported delta {:?} for path status {:?}", path_status.delta, path_status))?
                 },
