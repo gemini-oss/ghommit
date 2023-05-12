@@ -1,16 +1,33 @@
-use git2::{Delta, DiffOptions, FileMode, Repository};
+use git2::{Delta, DiffOptions, FileMode, Repository, Index, ObjectType};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct PathStatus {
     pub delta: Delta,
     pub file_mode: FileMode,
-    pub path: String,
+    pub object_type: Option<ObjectType>,
     pub original_path: Option<String>,
+    pub path: String,
+}
+
+/// Currently conflicts are not supported. Should that change in the future,
+/// this function would likely be removed and other changes would need to be
+/// made to accommodate.
+///
+/// https://git-scm.com/docs/revisions/2.39.3#Documentation/revisions.txt-emltngtltpathgtemegem0READMEememREADMEem
+fn stage_number(index: &Index) -> Result<i32, String> {
+    if index.has_conflicts() {
+        Err(format!("Handling conflicts is not supported, and conflicts were detected"))
+    } else {
+        Ok(0)
+    }
 }
 
 pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
     let index = repo.index()
         .map_err(|e| format!("Unable to read git index: {}", e))?;
+
+    let stage_number = stage_number(&index)?;
+
     let head = repo.head()
         .map_err(|e| format!("Unable to read git head: {}", e))?;
     let head_tree = head.peel_to_tree()
@@ -32,14 +49,23 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
         let delta = diff_delta.status();
         let file_mode = diff_delta.new_file().mode();
 
-        let path = match diff_delta.new_file().path() {
-            Some(path) => {
-                match path.to_str() {
-                    Some(path_str) => path_str.to_owned(),
-                    None => Err(format!("Path could not be converted to a string: {:?}", path))?,
+        let new_path = diff_delta.new_file().path()
+            .ok_or_else(|| format!("Delta is missing path: {:?}", diff_delta))?;
+
+        let path_string = match new_path.to_str() {
+            Some(path_str) => path_str.to_owned(),
+            None => Err(format!("Path could not be converted to a string: {:?}", new_path))?,
+        };
+
+        let object_type = match index.get_path(new_path, stage_number) {
+            Some(index_entry) => {
+                match repo.find_object(index_entry.id, None) {
+                    Ok(object) => object.kind(),
+                    Err(_) => Err(format!("Unable to find object with ID {}", index_entry.id))?,
                 }
             },
-            None => Err(format!("Delta is missing path: {:?}", diff_delta))?,
+            // - Deleted files will not have a tree entry
+            None => None,
         };
 
         let original_path = match diff_delta.old_file().path() {
@@ -55,8 +81,9 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
         let path_status = PathStatus {
             delta: delta,
             file_mode: file_mode,
-            path: path,
+            object_type: object_type,
             original_path: original_path,
+            path: path_string,
         };
 
         changes.push(path_status);
@@ -209,8 +236,9 @@ mod git_status_tests {
                 PathStatus {
                     delta: git2::Delta::Added,
                     file_mode: FileMode::Blob,
-                    path: path.to_owned(),
+                    object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(path.to_owned()),
+                    path: path.to_owned(),
                 },
             ]
         };
@@ -241,8 +269,9 @@ mod git_status_tests {
                 PathStatus {
                     delta: git2::Delta::Modified,
                     file_mode: FileMode::Blob,
-                    path: path.to_owned(),
+                    object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(path.to_owned()),
+                    path: path.to_owned(),
                 },
             ]
         };
@@ -271,8 +300,9 @@ mod git_status_tests {
                 PathStatus {
                     delta: git2::Delta::Deleted,
                     file_mode: FileMode::Unreadable,
-                    path: path.to_owned(),
+                    object_type: None,
                     original_path: Some(path.to_owned()),
+                    path: path.to_owned(),
                 },
             ]
         };
@@ -312,19 +342,22 @@ mod git_status_tests {
                 PathStatus {
                     delta: git2::Delta::Added,
                     file_mode: FileMode::Blob,
-                    path: baz_path.to_owned(),
+                    object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(baz_path.to_owned()),
+                    path: baz_path.to_owned(),
                 },
                 PathStatus {
                     delta: git2::Delta::Modified,
                     file_mode: FileMode::Blob,
-                    path: bar_path.to_owned(),
+                    object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(bar_path.to_owned()),
+                    path: bar_path.to_owned(),
                 },
                 PathStatus {
                     delta: git2::Delta::Deleted,
                     file_mode: FileMode::Unreadable,
                     path: foo_path.to_owned(),
+                    object_type: None,
                     original_path: Some(foo_path.to_owned()),
                 },
             ]
