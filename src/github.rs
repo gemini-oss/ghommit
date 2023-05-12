@@ -302,7 +302,26 @@ impl GitHubClient<'_> {
 pub mod rest_api {
     pub mod request {
 
-        /// [Create a Tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
+        /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
+        pub mod create_a_blob {
+            use serde::Serialize;
+
+            #[derive(Debug, Serialize)]
+            pub struct CreateABlob<'a> {
+                pub content: &'a str,
+                pub encoding: Encoding,
+            }
+
+            #[derive(Debug, Serialize)]
+            pub enum Encoding {
+                #[serde(rename = "base64")]
+                Base64,
+                #[serde(rename = "utf-8")]
+                Utf8,
+            }
+        }
+
+        /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
         ///
         /// The entirety of GitHub's trees API uses snake case, so serde
         /// renaming is only necessary for enum variants that derive `Serialize`
@@ -547,23 +566,68 @@ pub mod response {
 }
 
 #[cfg(test)]
-mod create_a_tree_tests {
+mod test_util {
     use serde_json::Value;
-
-    use super::rest_api::request::create_a_tree::{CreateATree, FileMode, NodeType, ShaOrContent, TreeNode};
 
     /// Serialized strings may not have the same order, so deserialize and
     /// compare
-    fn assert_eq_deserialized(a: &str, b: &str) {
+    pub fn assert_eq_deserialized(a: &str, b: &str) {
         let a_deserialized: Value = serde_json::from_str(&a).unwrap();
         let b_deserialized: Value = serde_json::from_str(&b).unwrap();
 
-        assert_eq!(a_deserialized, b_deserialized)
+        assert_eq!(a_deserialized, b_deserialized);
     }
 
-    fn quote(s: &str) -> String {
+    pub fn quote(s: &str) -> String {
         format!("\"{}\"", s)
     }
+
+}
+#[cfg(test)]
+mod create_a_blob_tests {
+    use super::rest_api::request::create_a_blob::{CreateABlob, Encoding};
+    use super::test_util::{assert_eq_deserialized, quote};
+
+    #[test]
+    fn encoding_serialization() {
+        let encodings = vec![
+            Encoding::Base64,
+            Encoding::Utf8,
+        ];
+
+        for encoding in encodings {
+            let expected_raw = match encoding {
+                Encoding::Base64 => "base64",
+                Encoding::Utf8 => "utf-8",
+            };
+
+            let actual = serde_json::to_string(&encoding).unwrap();
+            let expected = quote(expected_raw);
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn create_a_blob_serialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob
+        let expected = r#"{"content":"Content of the blob","encoding":"utf-8"}"#;
+
+        let actual_payload = CreateABlob {
+            content: "Content of the blob",
+            encoding: Encoding::Utf8,
+        };
+
+        let actual = serde_json::to_string(&actual_payload).unwrap();
+
+        assert_eq_deserialized(&actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod create_a_tree_tests {
+    use super::rest_api::request::create_a_tree::{CreateATree, FileMode, NodeType, ShaOrContent, TreeNode};
+    use super::test_util::{assert_eq_deserialized, quote};
 
     fn manual_file_mode_to_json_string(file_mode: &FileMode) -> String {
         let raw_octal = match file_mode.file_mode {
@@ -576,7 +640,7 @@ mod create_a_tree_tests {
             git2::FileMode::Unreadable => "000000",
         };
 
-        format!("\"{}\"", raw_octal)
+        quote(raw_octal)
     }
 
     fn manual_node_type_to_json_string(node_type: &NodeType) -> &'static str {
@@ -599,7 +663,8 @@ mod create_a_tree_tests {
             .replace("\n", "\\n")
             .replace("\r", "\\r")
             .replace("\t", "\\t");
-        format!("\"{}\"", s)
+
+        quote(&s)
     }
 
     fn manual_tree_node_to_json_string(path: &str, mode: &FileMode, node_type: &NodeType, sha_or_content: &ShaOrContent) -> String {
@@ -650,7 +715,7 @@ mod create_a_tree_tests {
             let actual = serde_json::to_string(&file_mode).unwrap();
             let expected = manual_file_mode_to_json_string(&file_mode);
 
-            assert_eq!(actual, expected)
+            assert_eq!(actual, expected);
         }
     }
 
@@ -672,7 +737,7 @@ mod create_a_tree_tests {
 
         let actual = serde_json::to_string(&tree_node).unwrap();
 
-        assert_eq_deserialized(&actual, &expected)
+        assert_eq_deserialized(&actual, &expected);
     }
 
     #[test]
@@ -693,7 +758,7 @@ mod create_a_tree_tests {
 
         let actual = serde_json::to_string(&tree_node).unwrap();
 
-        assert_eq_deserialized(&actual, &expected)
+        assert_eq_deserialized(&actual, &expected);
     }
 
     #[test]
@@ -714,7 +779,7 @@ mod create_a_tree_tests {
 
         let actual = serde_json::to_string(&tree_node).unwrap();
 
-        assert_eq_deserialized(&actual, &expected)
+        assert_eq_deserialized(&actual, &expected);
     }
 
     #[test]
@@ -736,7 +801,7 @@ mod create_a_tree_tests {
 
             let actual = serde_json::to_string(&type_).unwrap();
 
-            assert_eq_deserialized(&actual, &expected)
+            assert_eq_deserialized(&actual, &expected);
         }
     }
 
@@ -759,6 +824,6 @@ mod create_a_tree_tests {
 
         let actual = serde_json::to_string(&actual_payload).unwrap();
 
-        assert_eq_deserialized(&actual, expected)
+        assert_eq_deserialized(&actual, expected);
     }
 }
