@@ -187,7 +187,7 @@ fn ghommit() -> Result<String, String> {
     let maybe_repo = git2::Repository::open(".");
     let config = config::Config::gather_config(maybe_repo)?;
 
-    let status = git_status(&config)?;
+    let status = git_status(&config.git_repo)?;
 
     let file_changes = path_statuses_to_file_changes(&status)?;
 

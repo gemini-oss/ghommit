@@ -1,16 +1,14 @@
-use git2::DiffOptions;
+use git2::{Delta, DiffOptions, FileMode, Repository};
 
-use crate::config::Config;
-
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct PathStatus {
-    pub delta: git2::Delta,
+    pub delta: Delta,
+    pub file_mode: FileMode,
     pub path: String,
     pub original_path: Option<String>,
 }
 
-pub fn git_status(config: &Config) -> Result<Vec<PathStatus>, String> {
-    let repo = &config.git_repo;
+pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
     let index = repo.index()
         .map_err(|e| format!("Unable to read git index: {}", e.to_string()))?;
     let head = repo.head()
@@ -30,18 +28,21 @@ pub fn git_status(config: &Config) -> Result<Vec<PathStatus>, String> {
 
     let mut changes: Vec<PathStatus> = vec![];
 
-    for delta in diff.deltas() {
-        let path = match delta.new_file().path() {
+    for diff_delta in diff.deltas() {
+        let delta = diff_delta.status();
+        let file_mode = diff_delta.new_file().mode();
+
+        let path = match diff_delta.new_file().path() {
             Some(path) => {
                 match path.to_str() {
                     Some(path_str) => path_str.to_owned(),
                     None => Err(format!("Path could not be converted to a string: {:?}", path))?,
                 }
             },
-            None => Err(format!("Delta is missing path: {:?}", delta))?,
+            None => Err(format!("Delta is missing path: {:?}", diff_delta))?,
         };
 
-        let original_path = match delta.old_file().path() {
+        let original_path = match diff_delta.old_file().path() {
             Some(path) => {
                 match path.to_str() {
                     Some(path_str) => Some(path_str.to_owned()),
@@ -52,7 +53,8 @@ pub fn git_status(config: &Config) -> Result<Vec<PathStatus>, String> {
         };
 
         let path_status = PathStatus {
-            delta: delta.status(),
+            delta: delta,
+            file_mode: file_mode,
             path: path,
             original_path: original_path,
         };
