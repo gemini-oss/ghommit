@@ -1,9 +1,10 @@
-use git2::{Delta, DiffOptions, FileMode, Repository, Index, ObjectType};
+use git2::{Delta, DiffOptions, FileMode, Index, ObjectType, Oid, Repository};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct PathStatus {
     pub delta: Delta,
     pub file_mode: FileMode,
+    pub object_id: Oid,
     pub object_type: Option<ObjectType>,
     pub original_path: Option<String>,
     pub path: String,
@@ -16,7 +17,7 @@ pub struct PathStatus {
 /// https://git-scm.com/docs/revisions/2.39.3#Documentation/revisions.txt-emltngtltpathgtemegem0READMEememREADMEem
 fn stage_number(index: &Index) -> Result<i32, String> {
     if index.has_conflicts() {
-        Err(format!("Handling conflicts is not supported, and conflicts were detected"))
+        Err("Handling conflicts is not supported, and conflicts were detected".to_owned())
     } else {
         Ok(0)
     }
@@ -46,10 +47,13 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
     let mut changes: Vec<PathStatus> = vec![];
 
     for diff_delta in diff.deltas() {
-        let delta = diff_delta.status();
-        let file_mode = diff_delta.new_file().mode();
+        let new_file = diff_delta.new_file();
 
-        let new_path = diff_delta.new_file().path()
+        let delta = diff_delta.status();
+        let file_mode = new_file.mode();
+        let object_id = new_file.id();
+
+        let new_path = new_file.path()
             .ok_or_else(|| format!("Delta is missing path: {:?}", diff_delta))?;
 
         let path_string = match new_path.to_str() {
@@ -81,6 +85,7 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
         let path_status = PathStatus {
             delta: delta,
             file_mode: file_mode,
+            object_id: object_id,
             object_type: object_type,
             original_path: original_path,
             path: path_string,
@@ -99,9 +104,41 @@ mod git_status_tests {
     use std::path::{Path, PathBuf};
 
     use git2::{Oid, Repository, Signature, FileMode};
+    use once_cell::sync::Lazy;
+    use sha1::{Digest, Sha1};
     use tempfile::{TempDir, tempdir};
 
     use super::{PathStatus, git_status};
+
+    static DELETED_FILE_OID: Lazy<Oid> = Lazy::new(|| {
+        oid_from_str("0000000000000000000000000000000000000000")
+    });
+
+    fn oid_from_str(hash_string: &str) -> Oid {
+        git2::Oid::from_str(&hash_string)
+            .expect(&format!("Could not convert string {} to Oid", hash_string))
+    }
+
+    fn path_to_str(path: &Path) -> &str {
+        path.to_str()
+            .expect(&format!("Unable to convert path {:?} to a string", path))
+    }
+
+    /// `git hash-object --stdin` approximation
+    pub fn git_hash_object_stdin(content: &str) -> Oid {
+        let header = format!("blob {}\0", content.len());
+
+        let mut hasher = Sha1::new();
+
+        hasher.update(header.as_bytes());
+        hasher.update(content.as_bytes());
+
+        let hash = hasher.finalize();
+
+        let hash_string = base16ct::lower::encode_string(&hash);
+
+        oid_from_str(&hash_string)
+    }
 
     struct TempGitRepo<'a> {
         directory: TempDir,
@@ -221,7 +258,9 @@ mod git_status_tests {
     #[test]
     fn added_file() {
         let repo = TempGitRepo::new();
-        let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
+
+        let foo_contents = "foo\n";
+        let foo = repo.create_or_replace_file("foo", foo_contents.as_bytes());
 
         repo.git_add(&foo);
 
@@ -229,13 +268,14 @@ mod git_status_tests {
             .expect("Unable to get a git status");
 
         let expected = {
-            let path = foo.to_str()
-                .expect(&format!("Unable to convert path {:?} to a string", foo));
+            let path = path_to_str(&foo);
+            let object_id = git_hash_object_stdin(foo_contents);
 
             vec![
                 PathStatus {
                     delta: git2::Delta::Added,
                     file_mode: FileMode::Blob,
+                    object_id: object_id,
                     object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(path.to_owned()),
                     path: path.to_owned(),
@@ -249,12 +289,14 @@ mod git_status_tests {
     #[test]
     fn modified_file() {
         let repo = TempGitRepo::new();
+
         let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
 
         repo.git_add(&foo);
         repo.git_commit("Adding foo");
 
-        let foo = repo.create_or_replace_file("foo", "foo\nfoo\n".as_bytes());
+        let foo_contents = "foo\nfoo\n";
+        let foo = repo.create_or_replace_file("foo", foo_contents.as_bytes());
 
         repo.git_add(&foo);
 
@@ -262,13 +304,14 @@ mod git_status_tests {
             .expect("Unable to get a git status");
 
         let expected = {
-            let path = foo.to_str()
-                .expect(&format!("Unable to convert path {:?} to a string", foo));
+            let path = path_to_str(&foo);
+            let object_id = git_hash_object_stdin(foo_contents);
 
             vec![
                 PathStatus {
                     delta: git2::Delta::Modified,
                     file_mode: FileMode::Blob,
+                    object_id: object_id,
                     object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(path.to_owned()),
                     path: path.to_owned(),
@@ -282,6 +325,7 @@ mod git_status_tests {
     #[test]
     fn deleted_file() {
         let repo = TempGitRepo::new();
+
         let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
 
         repo.git_add(&foo);
@@ -293,13 +337,14 @@ mod git_status_tests {
             .expect("Unable to get a git status");
 
         let expected = {
-            let path = foo.to_str()
-                .expect(&format!("Unable to convert path {:?} to a string", foo));
+            let path = path_to_str(&foo);
+            let object_id = *DELETED_FILE_OID;
 
             vec![
                 PathStatus {
                     delta: git2::Delta::Deleted,
                     file_mode: FileMode::Unreadable,
+                    object_id: object_id,
                     object_type: None,
                     original_path: Some(path.to_owned()),
                     path: path.to_owned(),
@@ -313,6 +358,7 @@ mod git_status_tests {
     #[test]
     fn multiple_changes() {
         let repo = TempGitRepo::new();
+
         let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
         let bar = repo.create_or_replace_file("bar", "bar\n".as_bytes());
 
@@ -320,7 +366,10 @@ mod git_status_tests {
         repo.git_add(&bar);
         repo.git_commit("Adding foo and bar");
 
+        let bar_content = "bar\nbar\n";
         let bar = repo.create_or_replace_file("bar", "bar\nbar\n".as_bytes());
+
+        let baz_content = "baz\n";
         let baz = repo.create_or_replace_file("baz", "baz\n".as_bytes());
 
         repo.git_add(&bar);
@@ -331,17 +380,20 @@ mod git_status_tests {
             .expect("Unable to get a git status");
 
         let expected = {
-            let foo_path = foo.to_str()
-                .expect(&format!("Unable to convert path {:?} to a string", foo));
-            let bar_path = bar.to_str()
-                .expect(&format!("Unable to convert path {:?} to a string", bar));
-            let baz_path = baz.to_str()
-                .expect(&format!("Unable to convert path {:?} to a string", baz));
+            let foo_path = path_to_str(&foo);
+            let foo_oid = *DELETED_FILE_OID;
+
+            let bar_path = path_to_str(&bar);
+            let bar_oid = git_hash_object_stdin(&bar_content);
+
+            let baz_path = path_to_str(&baz);
+            let baz_oid = git_hash_object_stdin(&baz_content);
 
             vec![
                 PathStatus {
                     delta: git2::Delta::Added,
                     file_mode: FileMode::Blob,
+                    object_id: baz_oid,
                     object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(baz_path.to_owned()),
                     path: baz_path.to_owned(),
@@ -349,6 +401,7 @@ mod git_status_tests {
                 PathStatus {
                     delta: git2::Delta::Modified,
                     file_mode: FileMode::Blob,
+                    object_id: bar_oid,
                     object_type: Some(git2::ObjectType::Blob),
                     original_path: Some(bar_path.to_owned()),
                     path: bar_path.to_owned(),
@@ -356,9 +409,10 @@ mod git_status_tests {
                 PathStatus {
                     delta: git2::Delta::Deleted,
                     file_mode: FileMode::Unreadable,
-                    path: foo_path.to_owned(),
+                    object_id: foo_oid,
                     object_type: None,
                     original_path: Some(foo_path.to_owned()),
+                    path: foo_path.to_owned(),
                 },
             ]
         };
