@@ -1,7 +1,6 @@
 #![allow(clippy::redundant_field_names)]
 
 use std::collections::HashSet;
-use std::fs;
 use std::io::Write;
 
 use base64::write::EncoderStringWriter;
@@ -63,21 +62,25 @@ fn delta_to_actions(git2_delta: git2::Delta) -> &'static HashSet<GitCommitAction
     }
 }
 
-fn read_as_base64(path: &str) -> Result<String, String> {
-    let mut enc = EncoderStringWriter::new(&base64::engine::general_purpose::STANDARD);
+fn read_as_base64(repo: &git2::Repository, object_id: git2::Oid) -> Result<String, String> {
+    let object = repo.find_object(object_id, None)
+        .map_err(|_| format!("Unable to find object {:?} in repo {:?}", object_id, repo.path()))?;
 
-    match fs::read(path) {
-        Ok(buf) => {
-            match enc.write_all(&buf) {
-                Ok(_) => Ok(enc.into_inner()),
-                Err(_) => Err(format!("Failed to Base64-encode path {}", path)),
-            }
-        },
-        Err(_) => Err(format!("Unable to read path {}", path)),
+    if let Some(blob) = object.as_blob() {
+        let bytes = blob.content();
+
+        let mut enc = EncoderStringWriter::new(&base64::engine::general_purpose::STANDARD);
+
+        match enc.write_all(bytes) {
+            Ok(_) => Ok(enc.into_inner()),
+            Err(_) => Err(format!("Failed to Base64-encode contents of object {:?} in repo {:?}", object_id, repo.path())),
+        }
+    } else {
+        Err(format!("Expected object {:?} in repo {:?} to be a blob, but found {:?}", object_id, repo.path(), object.kind()))
     }
 }
 
-fn path_statuses_to_file_changes(status: &Vec<PathStatus>) -> Result<FileChanges, String> {
+fn path_statuses_to_file_changes(repo: &git2::Repository, status: &Vec<PathStatus>) -> Result<FileChanges, String> {
     fn checks(additions: &Vec<FileAddition>, deletions: &Vec<FileDeletion>) -> Result<(), String> {
         // Emptiness
         if additions.is_empty() && deletions.is_empty() {
@@ -118,7 +121,7 @@ fn path_statuses_to_file_changes(status: &Vec<PathStatus>) -> Result<FileChanges
                     let path = path_status.path.clone();
 
                     let file_addition = FileAddition {
-                        contents: read_as_base64(&path)?,
+                        contents: read_as_base64(repo, path_status.object_id)?,
                         path: path,
                     };
 
@@ -189,7 +192,7 @@ fn ghommit() -> Result<String, String> {
 
     let status = git_status(&config.git_repo)?;
 
-    let file_changes = path_statuses_to_file_changes(&status)?;
+    let file_changes = path_statuses_to_file_changes(&config.git_repo, &status)?;
 
     let github_client = GitHubClient{
         github_app_id: config.github_app_id,
