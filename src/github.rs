@@ -300,100 +300,97 @@ impl GitHubClient<'_> {
 }
 
 pub mod rest_api {
-    pub mod request {
+    /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
+    pub mod create_a_blob {
+        use serde::Serialize;
 
-        /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
-        pub mod create_a_blob {
-            use serde::Serialize;
-
-            #[derive(Debug, Serialize)]
-            pub struct CreateABlob<'a> {
-                pub content: &'a str,
-                pub encoding: Encoding,
-            }
-
-            #[derive(Debug, Serialize)]
-            pub enum Encoding {
-                #[serde(rename = "base64")]
-                Base64,
-                #[serde(rename = "utf-8")]
-                Utf8,
-            }
+        #[derive(Debug, Serialize)]
+        pub enum Encoding {
+            #[serde(rename = "base64")]
+            Base64,
+            #[serde(rename = "utf-8")]
+            Utf8,
         }
 
-        /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
-        ///
-        /// The entirety of GitHub's trees API uses snake case, so serde
-        /// renaming is only necessary for enum variants that derive `Serialize`
-        pub mod create_a_tree {
-            use serde::{Serialize, Serializer};
-            use serde::ser::SerializeStruct;
+        #[derive(Debug, Serialize)]
+        pub struct RequestBody<'a> {
+            pub content: &'a str,
+            pub encoding: Encoding,
+        }
+    }
 
-            #[derive(Debug, Serialize)]
-            pub struct CreateATree {
-                pub base_tree: String,
-                pub tree: Vec<TreeNode>,
-            }
+    /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
+    ///
+    /// The entirety of GitHub's trees API uses snake case, so serde
+    /// renaming is only necessary for enum variants that derive `Serialize`
+    pub mod create_a_tree {
+        use serde::{Serialize, Serializer};
+        use serde::ser::SerializeStruct;
 
-            #[derive(Debug, Serialize)]
-            pub enum FileMode {
-                #[serde(rename = "100644")]
-                Blob,
-                #[serde(rename = "100755")]
-                BlobExecutable,
-                #[serde(rename = "160000")]
-                Commit,
-                #[serde(rename = "120000")]
-                Link,
-                #[serde(rename = "040000")]
-                Tree,
-            }
+        #[derive(Debug, Serialize)]
+        pub struct RequestBody {
+            pub base_tree: String,
+            pub tree: Vec<TreeNode>,
+        }
 
-            #[derive(Debug, Serialize)]
-            #[serde(rename_all = "lowercase")]
-            pub enum NodeType {
-                Blob,
-                Commit,
-                Tree,
-            }
+        #[derive(Debug, Serialize)]
+        pub enum FileMode {
+            #[serde(rename = "100644")]
+            Blob,
+            #[serde(rename = "100755")]
+            BlobExecutable,
+            #[serde(rename = "160000")]
+            Commit,
+            #[serde(rename = "120000")]
+            Link,
+            #[serde(rename = "040000")]
+            Tree,
+        }
 
-            // - Since `TreeNode` needs to manually implement serialization for
-            //   this type, there is no need for anything serde-related
-            #[derive(Debug)]
-            pub enum ShaOrContent {
-                Content(String),
-                Sha(Option<String>),
-            }
+        #[derive(Debug, Serialize)]
+        #[serde(rename_all = "lowercase")]
+        pub enum NodeType {
+            Blob,
+            Commit,
+            Tree,
+        }
 
-            #[derive(Debug)]
-            pub struct TreeNode {
-                pub path: String,
-                pub file_mode: FileMode,
-                pub node_type: NodeType,
-                pub sha_or_content: ShaOrContent,
-            }
+        // - Since `TreeNode` needs to manually implement serialization for
+        //   this type, there is no need for anything serde-related
+        #[derive(Debug)]
+        pub enum ShaOrContent {
+            Content(String),
+            Sha(Option<String>),
+        }
 
-            // - Since `sha_or_content` needs to serialize to one and only one
-            //   of `sha` or `content`, which serde doesn't support, serialize
-            //   must be implemented manually
-            impl Serialize for TreeNode {
-                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-                where
-                    S: Serializer
-                {
-                    let mut state = serializer.serialize_struct("TreeNode", 4)?;
+        #[derive(Debug)]
+        pub struct TreeNode {
+            pub path: String,
+            pub file_mode: FileMode,
+            pub node_type: NodeType,
+            pub sha_or_content: ShaOrContent,
+        }
 
-                    state.serialize_field("path", &self.path)?;
-                    state.serialize_field("mode", &self.file_mode)?;
-                    state.serialize_field("type", &self.node_type)?;
+        // - Since `sha_or_content` needs to serialize to one and only one
+        //   of `sha` or `content`, which serde doesn't support, serialize
+        //   must be implemented manually
+        impl Serialize for TreeNode {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer
+            {
+                let mut state = serializer.serialize_struct("TreeNode", 4)?;
 
-                    match &self.sha_or_content {
-                        ShaOrContent::Sha(sha) => state.serialize_field("sha", sha)?,
-                        ShaOrContent::Content(content) => state.serialize_field("content", content)?,
-                    };
+                state.serialize_field("path", &self.path)?;
+                state.serialize_field("mode", &self.file_mode)?;
+                state.serialize_field("type", &self.node_type)?;
 
-                    state.end()
-                }
+                match &self.sha_or_content {
+                    ShaOrContent::Sha(sha) => state.serialize_field("sha", sha)?,
+                    ShaOrContent::Content(content) => state.serialize_field("content", content)?,
+                };
+
+                state.end()
             }
         }
     }
@@ -582,7 +579,7 @@ mod test_util {
 }
 #[cfg(test)]
 mod create_a_blob_tests {
-    use super::rest_api::request::create_a_blob::{CreateABlob, Encoding};
+    use super::rest_api::create_a_blob::{Encoding, RequestBody};
     use super::test_util::{assert_eq_deserialized, quote};
 
     #[test]
@@ -610,7 +607,7 @@ mod create_a_blob_tests {
         // From the docs: https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob
         let expected = r#"{"content":"Content of the blob","encoding":"utf-8"}"#;
 
-        let actual_payload = CreateABlob {
+        let actual_payload = RequestBody {
             content: "Content of the blob",
             encoding: Encoding::Utf8,
         };
@@ -623,7 +620,7 @@ mod create_a_blob_tests {
 
 #[cfg(test)]
 mod create_a_tree_tests {
-    use super::rest_api::request::create_a_tree::{CreateATree, FileMode, NodeType, ShaOrContent, TreeNode};
+    use super::rest_api::create_a_tree::{FileMode, NodeType, RequestBody, ShaOrContent, TreeNode};
     use super::test_util::{assert_eq_deserialized, quote};
 
     fn manual_file_mode_to_json_string(file_mode: &FileMode) -> String {
@@ -812,7 +809,7 @@ mod create_a_tree_tests {
         // From the docs: https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree
         let expected = r#"{"base_tree":"9fb037999f264ba9a7fc6274d15fa3ae2ab98312","tree":[{"path":"file.rb","mode":"100644","type":"blob","sha":"44b4fc6d56897b048c772eb4087f854f46256132"}]}"#;
 
-        let actual_payload  = CreateATree {
+        let actual_payload  = RequestBody {
             base_tree: "9fb037999f264ba9a7fc6274d15fa3ae2ab98312".to_owned(),
             tree: vec![
                 TreeNode {
