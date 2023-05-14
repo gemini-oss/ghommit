@@ -9,6 +9,8 @@ use serde::Serialize;
 
 use crate::config::Config;
 
+use self::rest_api::create_a_blob;
+
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
 
@@ -182,6 +184,36 @@ impl GitHubClient<'_> {
         }
     }
 
+    fn deserialize_expected_response<R: DeserializeOwned>(&self, response: Response, expected_status_code: &StatusCode, operation: &str) -> Result<R, String> {
+        let status_code = response.status();
+
+        if &status_code != expected_status_code {
+            return match &response.text() {
+                Ok(text) => Err(format!("Unexpected status code {} while {}: {}", status_code, operation, text)),
+                Err(_) => Err(format!("Unexpected status code {} while {}; body could not be decoded as text", status_code, operation)),
+            }
+        }
+
+        // - Read as text before deserializing to a struct since `.text()` and
+        //   `.json()` are move operations, and `.text()` is more likely to
+        //   succeed
+        let text = match response.text() {
+            Ok(text) => text,
+            Err(e) => Err(format!("Error occurred while reading response body as text while trying to {}: {}", operation, e))?,
+        };
+
+        let data = match serde_json::from_str::<R>(&text) {
+            Ok(typed_result) => typed_result,
+            Err(e) => {
+                let err_str = e.to_string();
+                let type_str = std::any::type_name::<R>();
+                Err(format!("Error occurred while deserializing response to {} while trying to {}: {}: {}", type_str, operation, err_str, text))?
+            }
+        };
+
+        Ok(data)
+    }
+
     fn make_graphql_request<T: Serialize + ?Sized, R: DeserializeOwned>(&self, json: &T) -> Result<R, String> {
         let http_client = self.get_http_client(None)?;
         let headers = self.base_headers(GitHubApiType::GraphQL, AuthorizationTokenType::AccessToken)?;
@@ -297,12 +329,21 @@ impl GitHubClient<'_> {
 
         Ok(response_data.data.create_commit_on_branch.commit.url)
     }
+
+    /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
+    pub fn create_a_blob(&self, config: &Config, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
+        let url = format!("{},/repos/{}/{}/git/blobs", REST_API_BASE_URL, config.github_repo_owner, config.github_repo_name);
+
+        let response = self.make_api_request(&url, Some(&payload), None)?;
+
+        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")
+    }
 }
 
 pub mod rest_api {
     /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
     pub mod create_a_blob {
-        use serde::Serialize;
+        use serde::{Deserialize, Serialize};
 
         #[derive(Debug, Serialize)]
         pub enum Encoding {
@@ -316,6 +357,12 @@ pub mod rest_api {
         pub struct RequestBody<'a> {
             pub content: &'a str,
             pub encoding: Encoding,
+        }
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct ResponseBody {
+            pub url: String,
+            pub sha: String,
         }
     }
 
@@ -579,7 +626,7 @@ mod test_util {
 }
 #[cfg(test)]
 mod create_a_blob_tests {
-    use super::rest_api::create_a_blob::{Encoding, RequestBody};
+    use super::rest_api::create_a_blob::{Encoding, RequestBody, ResponseBody};
     use super::test_util::{assert_eq_deserialized, quote};
 
     #[test]
@@ -610,6 +657,26 @@ mod create_a_blob_tests {
         let actual_payload = RequestBody {
             content: "Content of the blob",
             encoding: Encoding::Utf8,
+        };
+
+        let actual = serde_json::to_string(&actual_payload).unwrap();
+
+        assert_eq_deserialized(&actual, expected);
+    }
+
+    #[test]
+    fn create_a_blob_deserialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob
+        let expected = r#"
+        {
+          "url": "https://api.github.com/repos/octocat/example/git/blobs/3a0f86fb8db8eea7ccbb9a95f325ddbedfb25e15",
+          "sha": "3a0f86fb8db8eea7ccbb9a95f325ddbedfb25e15"
+        }
+        "#;
+
+        let actual_payload = ResponseBody {
+            url: "https://api.github.com/repos/octocat/example/git/blobs/3a0f86fb8db8eea7ccbb9a95f325ddbedfb25e15".to_string(),
+            sha: "3a0f86fb8db8eea7ccbb9a95f325ddbedfb25e15".to_string(),
         };
 
         let actual = serde_json::to_string(&actual_payload).unwrap();
