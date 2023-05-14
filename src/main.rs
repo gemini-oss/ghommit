@@ -13,6 +13,7 @@ use crate::github::request::{CreateCommitOnBranchInput, CommittableBranch, Commi
 
 mod config;
 mod github;
+mod create_a_tree_prep;
 mod git_status;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
