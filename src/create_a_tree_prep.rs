@@ -142,8 +142,8 @@ fn git2_node_type_to_github_node_type(path_status: &PathStatus, git_object: &git
     }
 }
 
-pub fn prep(config: &Config, repo: &git2::Repository, git_status: &Vec<PathStatus>, github_client: &GitHubClient) -> Result<Vec<create_a_tree::TreeNode>, String> {
-    let mut ret = Vec::with_capacity(git_status.len());
+pub fn generate_request_body(config: &Config, repo: &git2::Repository, git_status: &Vec<PathStatus>, github_client: &GitHubClient) -> Result<create_a_tree::RequestBody, String> {
+    let mut tree = Vec::with_capacity(git_status.len());
 
     for path_status in git_status {
         let actions = delta_to_actions(path_status.delta);
@@ -181,7 +181,7 @@ pub fn prep(config: &Config, repo: &git2::Repository, git_status: &Vec<PathStatu
                         sha_or_content: sha_or_content,
                     };
 
-                    ret.push(node);
+                    tree.push(node);
                 },
                 GitCommitAction::DeletePath | GitCommitAction::DeleteOriginalPath => {
                     let path = match action {
@@ -202,7 +202,7 @@ pub fn prep(config: &Config, repo: &git2::Repository, git_status: &Vec<PathStatu
                         sha_or_content: create_a_tree::ShaOrContent::Sha(None),
                     };
 
-                    ret.push(node);
+                    tree.push(node);
                 },
                 GitCommitAction::Nop => {},
                 GitCommitAction::Unsupported => {
@@ -212,5 +212,10 @@ pub fn prep(config: &Config, repo: &git2::Repository, git_status: &Vec<PathStatu
         }
     }
 
-    Ok(ret)
+    let body = create_a_tree::RequestBody {
+        base_tree: config.git_head_object_id.clone(),
+        tree: tree,
+    };
+
+    Ok(body)
 }
