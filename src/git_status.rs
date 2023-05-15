@@ -101,6 +101,7 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
 mod git_status_tests {
     use std::fs::File;
     use std::io::Write;
+    use std::os::unix;
     use std::path::{Path, PathBuf};
 
     use git2::{Oid, Repository, Signature, FileMode};
@@ -182,7 +183,19 @@ mod git_status_tests {
             }
         }
 
-        pub fn create_or_replace_file(&self, filename: &str, contents: &[u8]) -> PathBuf {
+        pub fn create_or_replace_symlink_file(&self, filename: &str, path_to_link_to: &str) -> PathBuf {
+            let link_file_absolute_path = self.directory.path().join(&filename);
+
+            unix::fs::symlink(path_to_link_to, &link_file_absolute_path)
+                .expect(&format!("Failed to create symlink {:?} pointing to {:?} in {:?}", link_file_absolute_path, filename, self.directory));
+
+            let relative_path = link_file_absolute_path.strip_prefix(&self.directory)
+                .expect(&format!("Failed to strip prefix {:?} from {:?}", self.directory, link_file_absolute_path));
+
+            relative_path.to_path_buf()
+        }
+
+        pub fn create_or_replace_blob_file(&self, filename: &str, contents: &[u8]) -> PathBuf {
             let file_path = self.directory.path().join(&filename);
 
             let mut file = File::create(&file_path)
@@ -192,7 +205,7 @@ mod git_status_tests {
                 .expect(&format!("Unable to write to file {:?}", file));
 
             let relative_path = file_path.strip_prefix(&self.directory)
-                .expect(&format!("Failed to strip prefix {:?} from {:?}", self.directory, file));
+                .expect(&format!("Failed to strip prefix {:?} from {:?}", self.directory, file_path));
 
             relative_path.to_path_buf()
         }
@@ -260,7 +273,7 @@ mod git_status_tests {
         let repo = TempGitRepo::new();
 
         let foo_contents = "foo\n";
-        let foo = repo.create_or_replace_file("foo", foo_contents.as_bytes());
+        let foo = repo.create_or_replace_blob_file("foo", foo_contents.as_bytes());
 
         repo.git_add(&foo);
 
@@ -287,16 +300,61 @@ mod git_status_tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn added_symlink() {
+        let repo = TempGitRepo::new();
+
+        let foo_contents = "foo\n";
+        let foo_path = "foo";
+        let foo = repo.create_or_replace_blob_file(foo_path, foo_contents.as_bytes());
+        let bar = repo.create_or_replace_symlink_file("bar", foo_path);
+
+        repo.git_add(&foo);
+        repo.git_add(&bar);
+
+        let actual = git_status(&repo.repo)
+            .expect("Unable to get a git status");
+
+        let expected = {
+            let foo_path = path_to_str(&foo);
+            let foo_object_id = git_hash_object_stdin(foo_contents);
+            let bar_path = path_to_str(&bar);
+            let bar_object_id = git_hash_object_stdin(foo_path);
+
+            vec![
+                PathStatus {
+                    delta: git2::Delta::Added,
+                    file_mode: FileMode::Blob,
+                    object_id: foo_object_id,
+                    object_type: Some(git2::ObjectType::Blob),
+                    original_path: Some(foo_path.to_string()),
+                    path: foo_path.to_string(),
+                },
+                PathStatus {
+                    delta: git2::Delta::Added,
+                    file_mode: FileMode::Link,
+                    object_id: bar_object_id,
+                    object_type: Some(git2::ObjectType::Blob),
+                    original_path: Some(bar_path.to_string()),
+                    path: bar_path.to_string(),
+                },
+            ]
+        };
+
+        assert_eq_order_independent(&actual, &expected);
+    }
+
+    #[test]
     fn modified_file() {
         let repo = TempGitRepo::new();
 
-        let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
+        let foo = repo.create_or_replace_blob_file("foo", "foo\n".as_bytes());
 
         repo.git_add(&foo);
         repo.git_commit("Adding foo");
 
         let foo_contents = "foo\nfoo\n";
-        let foo = repo.create_or_replace_file("foo", foo_contents.as_bytes());
+        let foo = repo.create_or_replace_blob_file("foo", foo_contents.as_bytes());
 
         repo.git_add(&foo);
 
@@ -326,7 +384,7 @@ mod git_status_tests {
     fn deleted_file() {
         let repo = TempGitRepo::new();
 
-        let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
+        let foo = repo.create_or_replace_blob_file("foo", "foo\n".as_bytes());
 
         repo.git_add(&foo);
         repo.git_commit("Adding foo");
@@ -359,18 +417,18 @@ mod git_status_tests {
     fn multiple_changes() {
         let repo = TempGitRepo::new();
 
-        let foo = repo.create_or_replace_file("foo", "foo\n".as_bytes());
-        let bar = repo.create_or_replace_file("bar", "bar\n".as_bytes());
+        let foo = repo.create_or_replace_blob_file("foo", "foo\n".as_bytes());
+        let bar = repo.create_or_replace_blob_file("bar", "bar\n".as_bytes());
 
         repo.git_add(&foo);
         repo.git_add(&bar);
         repo.git_commit("Adding foo and bar");
 
         let bar_content = "bar\nbar\n";
-        let bar = repo.create_or_replace_file("bar", "bar\nbar\n".as_bytes());
+        let bar = repo.create_or_replace_blob_file("bar", "bar\nbar\n".as_bytes());
 
         let baz_content = "baz\n";
-        let baz = repo.create_or_replace_file("baz", "baz\n".as_bytes());
+        let baz = repo.create_or_replace_blob_file("baz", "baz\n".as_bytes());
 
         repo.git_add(&bar);
         repo.git_add(&baz);
