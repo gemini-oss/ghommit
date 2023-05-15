@@ -219,3 +219,51 @@ pub fn generate_request_body(config: &Config, repo: &git2::Repository, git_statu
 
     Ok(body)
 }
+
+#[cfg(test)]
+mod create_a_tree_prep_tests {
+    use git2::Repository;
+
+    use crate::git_status::{PathStatus, git_status};
+    use crate::test_utils::test_utils::TempGitRepo;
+
+    use super::{ObjectContents, read_file};
+
+    fn read_git_object(repo: &Repository, git_status: &Vec<PathStatus>, filename: &str) -> ObjectContents {
+        let path_status = git_status.iter().find(|ps| ps.path == filename)
+            .expect(&format!("Failed to find filename {} in git status", filename));
+
+        let git_object = repo.find_object(path_status.object_id, None)
+            .expect(&format!("Could not find object with ID {} in repo {:?}", path_status.object_id, repo.path()));
+
+        read_file(path_status, &git_object)
+            .expect(&format!("Failed to read git object {:?}", git_object))
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn read_symlink_test() {
+        let repo = TempGitRepo::new();
+
+        let foo_path = "foo";
+        let foo = repo.create_or_replace_blob_file(foo_path, "foo\n".as_bytes());
+
+        repo.git_add(&foo);
+        repo.git_commit("Add foo");
+
+        let bar_filename = "bar";
+        let bar = repo.create_or_replace_symlink_file(&bar_filename, foo_path);
+
+        repo.git_add(&bar);
+
+        let status = git_status(&repo.repo)
+            .expect("Unable to get a git status");
+
+        let contents = read_git_object(&repo.repo, &status, bar_filename);
+
+        match contents {
+            ObjectContents::Text(text) => assert_eq!(text, foo_path),
+            ObjectContents::Base64(_) => panic!("Expected ObjectContents::Text, but found ObjectContents::Base64"),
+        }
+    }
+}
