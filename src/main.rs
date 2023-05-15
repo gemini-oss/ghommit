@@ -15,6 +15,7 @@ mod config;
 mod github;
 mod create_a_tree_prep;
 mod git_status;
+mod test_utils;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 enum GitCommitAction {
