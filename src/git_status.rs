@@ -99,7 +99,7 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
 
 #[cfg(test)]
 mod git_status_tests {
-    use std::fs::File;
+    use std::fs::{self, File};
     use std::io::Write;
     use std::os::unix;
     use std::path::{Path, PathBuf};
@@ -197,6 +197,10 @@ mod git_status_tests {
 
         pub fn create_or_replace_blob_file(&self, filename: &str, contents: &[u8]) -> PathBuf {
             let file_path = self.directory.path().join(&filename);
+
+            // - This will be an error if it doesn't exist, which is fine to
+            //   ignore
+            if let Err(_) = fs::remove_file(&file_path) {}
 
             let mut file = File::create(&file_path)
                 .expect(&format!("Failed to create file {} in {:?}", filename, self.directory));
@@ -414,24 +418,71 @@ mod git_status_tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn typechange_test() {
+        let repo = TempGitRepo::new();
+
+        let foo_path = "foo";
+        let foo = repo.create_or_replace_blob_file(foo_path, "foo\n".as_bytes());
+        let bar = repo.create_or_replace_symlink_file("bar", foo_path);
+
+        repo.git_add(&foo);
+        repo.git_add(&bar);
+        repo.git_commit("Add foo as blob and bar as symlink");
+
+        let bar_contents = "bar\n";
+        let bar = repo.create_or_replace_blob_file("bar", bar_contents.as_bytes());
+
+        repo.git_add(&bar);
+
+        let actual = git_status(&repo.repo)
+            .expect("Unable to get a git status");
+
+        let expected = {
+            let bar_path = path_to_str(&bar);
+            let bar_object_id = git_hash_object_stdin(bar_contents);
+
+            vec![
+                PathStatus {
+                    delta: git2::Delta::Typechange,
+                    file_mode: FileMode::Blob,
+                    object_id: bar_object_id,
+                    object_type: Some(git2::ObjectType::Blob),
+                    original_path: Some(bar_path.to_string()),
+                    path: bar_path.to_string(),
+                },
+            ]
+        };
+
+        assert_eq_order_independent(&actual, &expected);
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn multiple_changes() {
         let repo = TempGitRepo::new();
 
         let foo = repo.create_or_replace_blob_file("foo", "foo\n".as_bytes());
         let bar = repo.create_or_replace_blob_file("bar", "bar\n".as_bytes());
+        let quux = repo.create_or_replace_symlink_file("quux", "foo");
 
         repo.git_add(&foo);
         repo.git_add(&bar);
+        repo.git_add(&quux);
         repo.git_commit("Adding foo and bar");
 
         let bar_content = "bar\nbar\n";
-        let bar = repo.create_or_replace_blob_file("bar", "bar\nbar\n".as_bytes());
+        let bar = repo.create_or_replace_blob_file("bar", bar_content.as_bytes());
 
         let baz_content = "baz\n";
-        let baz = repo.create_or_replace_blob_file("baz", "baz\n".as_bytes());
+        let baz = repo.create_or_replace_blob_file("baz", baz_content.as_bytes());
+
+        let quux_content = "quux\n";
+        let quux = repo.create_or_replace_blob_file("quux", quux_content.as_bytes());
 
         repo.git_add(&bar);
         repo.git_add(&baz);
+        repo.git_add(&quux);
         repo.git_rm(&foo);
 
         let actual = git_status(&repo.repo)
@@ -446,6 +497,9 @@ mod git_status_tests {
 
             let baz_path = path_to_str(&baz);
             let baz_oid = git_hash_object_stdin(&baz_content);
+
+            let quux_path = path_to_str(&quux);
+            let quux_oid = git_hash_object_stdin(&quux_content);
 
             vec![
                 PathStatus {
@@ -471,6 +525,14 @@ mod git_status_tests {
                     object_type: None,
                     original_path: Some(foo_path.to_owned()),
                     path: foo_path.to_owned(),
+                },
+                PathStatus {
+                    delta: git2::Delta::Typechange,
+                    file_mode: FileMode::Blob,
+                    object_id: quux_oid,
+                    object_type: Some(git2::ObjectType::Blob),
+                    original_path: Some(quux_path.to_string()),
+                    path: quux_path.to_string(),
                 },
             ]
         };
