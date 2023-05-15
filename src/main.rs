@@ -195,11 +195,11 @@ fn ghommit() -> Result<String, String> {
 
     let file_changes = path_statuses_to_file_changes(&config.git_repo, &status)?;
 
-    let github_client = GitHubClient{
-        github_app_id: config.github_app_id,
-        github_app_installation_id: config.github_app_installation_id,
-        github_app_private_key: &config.github_app_private_key,
-    };
+    let github_client = GitHubClient::new(
+        config.github_app_id,
+        config.github_app_installation_id,
+        config.github_app_private_key.clone(),
+    );
 
     let commit_url = commit_via_github_api(&github_client, &config, file_changes)?;
 

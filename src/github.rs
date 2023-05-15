@@ -14,10 +14,10 @@ use self::rest_api::create_a_blob;
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
 
-pub struct GitHubClient<'a> {
-    pub github_app_id: u64,
-    pub github_app_installation_id: u64,
-    pub github_app_private_key: &'a EncodingKey,
+pub struct GitHubClient {
+    github_app_id: u64,
+    github_app_installation_id: u64,
+    github_app_private_key: EncodingKey,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,7 +47,15 @@ enum AuthorizationTokenType {
     Jwt,
 }
 
-impl GitHubClient<'_> {
+impl GitHubClient {
+    pub fn new(github_app_id: u64, github_app_installation_id: u64, github_app_private_key: EncodingKey) -> GitHubClient {
+        GitHubClient {
+            github_app_id: github_app_id,
+            github_app_installation_id: github_app_installation_id,
+            github_app_private_key: github_app_private_key,
+        }
+    }
+
     fn unix_epoch_second_now() -> Result<usize, String> {
         let now = SystemTime::now();
 
@@ -83,7 +91,7 @@ impl GitHubClient<'_> {
             iss: self.github_app_id.to_string(),
         };
 
-        let maybe_jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, self.github_app_private_key);
+        let maybe_jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &self.github_app_private_key);
 
         match maybe_jwt {
             Ok(jwt) => Ok(jwt),
