@@ -6,16 +6,10 @@ use std::io::Write;
 use base64::write::EncoderStringWriter;
 use once_cell::sync::Lazy;
 
-use crate::config::Config;
-use crate::git_status::{git_status, PathStatus};
-use crate::github::GitHubClient;
-use crate::github::request::{CreateCommitOnBranchInput, CommittableBranch, CommitMessage, FileAddition, FileChanges, FileDeletion};
-
-mod config;
-mod github;
-mod create_a_tree_prep;
-mod git_status;
-mod test_utils;
+use ghommit::config::Config;
+use ghommit::git_status::{git_status, PathStatus};
+use ghommit::github::GitHubClient;
+use ghommit::github::request::{CreateCommitOnBranchInput, CommittableBranch, CommitMessage, FileAddition, FileChanges, FileDeletion};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 enum GitCommitAction {

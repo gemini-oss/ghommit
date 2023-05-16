@@ -96,7 +96,7 @@ impl GitConfig {
 pub struct EnvironmentVariableConfig {
     pub github_app_id: u64,
     pub github_app_installation_id: u64,
-    pub github_app_private_key_pem_data: EncodingKey,
+    pub github_app_private_key: EncodingKey,
 }
 
 impl EnvironmentVariableConfig {
@@ -129,7 +129,7 @@ impl EnvironmentVariableConfig {
         Ok(EnvironmentVariableConfig {
             github_app_id: Self::environment_variable_u64("GHOMMIT_GITHUB_APP_ID")?,
             github_app_installation_id: Self::environment_variable_u64("GHOMMIT_GITHUB_APP_INSTALLATION_ID")?,
-            github_app_private_key_pem_data: Self::environment_variable_rsa_private_key("GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA")?,
+            github_app_private_key: Self::environment_variable_rsa_private_key("GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA")?,
         })
     }
 }
@@ -157,7 +157,7 @@ impl Config {
             git_should_force_push: cli_args.git_should_force_push,
             github_app_id: env_config.github_app_id,
             github_app_installation_id: env_config.github_app_installation_id,
-            github_app_private_key: env_config.github_app_private_key_pem_data,
+            github_app_private_key: env_config.github_app_private_key,
             github_repo_owner: cli_args.github_repo_owner,
             github_repo_name: cli_args.github_repo_name,
         }
