@@ -1,39 +1,8 @@
 use std::{env, fmt};
 
 use clap::Parser;
-use git2::{Repository, Error};
+use git2::Repository;
 use jsonwebtoken::EncodingKey;
-
-pub struct Config {
-    pub commit_message: String,
-    pub git_branch_name: String,
-    pub git_head_object_id: String,
-    pub git_repo: Repository,
-    pub git_should_force_push: bool,
-    pub github_app_id: u64,
-    pub github_app_installation_id: u64,
-    pub github_app_private_key: EncodingKey,
-    pub github_repo_owner: String,
-    pub github_repo_name: String,
-}
-
-impl fmt::Display for Config {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Config {{ ")?;
-        write!(f, "commit_message: \"{}\"", self.commit_message)?;
-        write!(f, ", git_branch: \"{}\"", self.git_branch_name)?;
-        write!(f, ", git_head_object_id: \"{}\"", self.git_head_object_id)?;
-        write!(f, ", git_repo: Repository {{ {} }}", self.git_repo.path().to_str().unwrap_or("(unknown)"))?;
-        write!(f, ", git_should_force_push: {}", self.git_should_force_push)?;
-        write!(f, ", github_app_id: {}", self.github_app_id)?;
-        write!(f, ", github_app_installation_id: {}", self.github_app_installation_id)?;
-        write!(f, ", github_app_private_key: EncodingKey {{ ... }} ")?;
-        write!(f, ", github_repo_owner: \"{}\"", self.github_repo_owner)?;
-        write!(f, ", github_repo_name: \"{}\"", self.github_repo_name)?;
-        write!(f, " }}")?;
-        Ok(())
-    }
-}
 
 /// ghommit: GitHub commit
 #[derive(Debug)]
@@ -54,21 +23,15 @@ struct CommandLineArgumentsRaw {
 }
 
 #[derive(Debug)]
-struct CommandLineArguments {
-    commit_message: String,
-    git_should_force_push: bool,
-    github_repo_owner: String,
-    github_repo_name: String,
+pub struct CommandLineArguments {
+    pub commit_message: String,
+    pub git_should_force_push: bool,
+    pub github_repo_owner: String,
+    pub github_repo_name: String,
 }
 
-struct GitConfig {
-    branch_name: String,
-    git_head_object_id: String,
-    repository: Repository,
-}
-
-impl Config {
-    fn command_line_arguments() -> Result<CommandLineArguments, String> {
+impl CommandLineArguments {
+    pub fn gather() -> Result<CommandLineArguments, String> {
         let raw_args = match CommandLineArgumentsRaw::try_parse() {
             Ok(res) => res,
             Err(e) => Err(e.to_string())?,
@@ -90,33 +53,16 @@ impl Config {
             }
         }
     }
+}
 
-    fn environment_variable(name: &str) -> Result<String, String> {
-        match env::var(name) {
-            Ok(result) => Ok(result),
-            Err(_) => Err(format!("Environment variable not set: {}", name)),
-        }
-    }
+pub struct GitConfig {
+    pub branch_name: String,
+    pub git_head_object_id: String,
+    pub repository: Repository,
+}
 
-    fn environment_variable_rsa_private_key(name: &str) -> Result<EncodingKey, String> {
-        let pem_data = Config::environment_variable(name)?;
-
-        match EncodingKey::from_rsa_pem(pem_data.as_bytes()) {
-            Ok(key) => Ok(key),
-            Err(_) => Err(format!("Environment variable {} is not valid RSA private key", name)),
-        }
-    }
-
-    fn environment_variable_u64(name: &str) -> Result<u64, String> {
-        let as_string = Config::environment_variable(name)?;
-
-        match as_string.parse::<u64>() {
-            Ok(result) => Ok(result),
-            Err(_) => Err(format!("Environment variable {} cannot be parsed as u64: {}", name, as_string)),
-        }
-    }
-
-    fn git_config(maybe_repo: Result<Repository, Error>) -> Result<GitConfig, String> {
+impl GitConfig {
+    pub fn gather(maybe_repo: Result<Repository, git2::Error>) -> Result<GitConfig, String> {
         match maybe_repo {
             Ok(repo) => {
                 let (branch_name, head_object_id) = match repo.head() {
@@ -131,13 +77,10 @@ impl Config {
                             Err(_) => Err(format!("Could not resolve commit for branch {}", branch_name)),
                         }?;
 
-                        // - Because the repo matched against needs to be
-                        //   returned as well, the return cannot be in this
-                        //   scope, so bail to outer scope
-                        Ok((branch_name, head_object_id))
+                        (branch_name, head_object_id)
                     },
-                    Err(_) => Err("Git repository doesn't have a HEAD".to_owned()),
-                }?;
+                    Err(_) => Err("Git repository doesn't have a HEAD".to_owned())?,
+                };
 
                 Ok(GitConfig {
                     branch_name: branch_name,
@@ -148,33 +91,104 @@ impl Config {
             Err(_) => Err("Not in a Git repository".to_owned()),
         }
     }
+}
 
-    /// Gathers the config from command line arguments, the Git repository, and
-    /// from environment variables.
-    pub fn gather_config(maybe_repo: Result<Repository, Error>) -> Result<Config, String> {
-        // Command line arguments
-        let cli_args = Self::command_line_arguments()?;
+pub struct EnvironmentVariableConfig {
+    pub github_app_id: u64,
+    pub github_app_installation_id: u64,
+    pub github_app_private_key_pem_data: EncodingKey,
+}
 
-        // Git
-        let git_config = Self::git_config(maybe_repo)?;
+impl EnvironmentVariableConfig {
+    fn environment_variable(name: &str) -> Result<String, String> {
+        match env::var(name) {
+            Ok(result) => Ok(result),
+            Err(_) => Err(format!("Environment variable not set: {}", name)),
+        }
+    }
 
-        // Environment variables
-        let github_app_id = Self::environment_variable_u64("GHOMMIT_GITHUB_APP_ID")?;
-        let github_app_installation_id = Self::environment_variable_u64("GHOMMIT_GITHUB_APP_INSTALLATION_ID")?;
-        let github_app_private_key_pem_data = Self::environment_variable_rsa_private_key("GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA")?;
+    fn environment_variable_rsa_private_key(name: &str) -> Result<EncodingKey, String> {
+        let pem_data = Self::environment_variable(name)?;
 
-        #[allow(clippy::redundant_field_names)]
-        Ok(Config {
+        match EncodingKey::from_rsa_pem(pem_data.as_bytes()) {
+            Ok(key) => Ok(key),
+            Err(_) => Err(format!("Environment variable {} is not valid RSA private key", name)),
+        }
+    }
+
+    fn environment_variable_u64(name: &str) -> Result<u64, String> {
+        let as_string = Self::environment_variable(name)?;
+
+        match as_string.parse::<u64>() {
+            Ok(result) => Ok(result),
+            Err(_) => Err(format!("Environment variable {} cannot be parsed as u64: {}", name, as_string)),
+        }
+    }
+
+    pub fn gather() -> Result<EnvironmentVariableConfig, String> {
+        Ok(EnvironmentVariableConfig {
+            github_app_id: Self::environment_variable_u64("GHOMMIT_GITHUB_APP_ID")?,
+            github_app_installation_id: Self::environment_variable_u64("GHOMMIT_GITHUB_APP_INSTALLATION_ID")?,
+            github_app_private_key_pem_data: Self::environment_variable_rsa_private_key("GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA")?,
+        })
+    }
+}
+
+pub struct Config {
+    pub commit_message: String,
+    pub git_branch_name: String,
+    pub git_head_object_id: String,
+    pub git_repo: Repository,
+    pub git_should_force_push: bool,
+    pub github_app_id: u64,
+    pub github_app_installation_id: u64,
+    pub github_app_private_key: EncodingKey,
+    pub github_repo_owner: String,
+    pub github_repo_name: String,
+}
+
+impl Config {
+    pub fn from(cli_args: CommandLineArguments, git_config: GitConfig, env_config: EnvironmentVariableConfig) -> Config {
+        Config {
             commit_message: cli_args.commit_message,
             git_branch_name: git_config.branch_name,
             git_head_object_id: git_config.git_head_object_id,
             git_repo: git_config.repository,
             git_should_force_push: cli_args.git_should_force_push,
-            github_app_id: github_app_id,
-            github_app_installation_id: github_app_installation_id,
-            github_app_private_key: github_app_private_key_pem_data,
+            github_app_id: env_config.github_app_id,
+            github_app_installation_id: env_config.github_app_installation_id,
+            github_app_private_key: env_config.github_app_private_key_pem_data,
             github_repo_owner: cli_args.github_repo_owner,
             github_repo_name: cli_args.github_repo_name,
-        })
+        }
+    }
+
+    /// Gathers the config from command line arguments, the Git repository, and
+    /// from environment variables.
+    pub fn gather(maybe_repo: Result<Repository, git2::Error>) -> Result<Config, String> {
+        let cli_args = CommandLineArguments::gather()?;
+        let git_config = GitConfig::gather(maybe_repo)?;
+        let env_config = EnvironmentVariableConfig::gather()?;
+
+        let config = Self::from(cli_args, git_config, env_config);
+        Ok(config)
+    }
+}
+
+impl fmt::Display for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Config {{ ")?;
+        write!(f, "commit_message: \"{}\"", self.commit_message)?;
+        write!(f, ", git_branch: \"{}\"", self.git_branch_name)?;
+        write!(f, ", git_head_object_id: \"{}\"", self.git_head_object_id)?;
+        write!(f, ", git_repo: Repository {{ {} }}", self.git_repo.path().to_str().unwrap_or("(unknown)"))?;
+        write!(f, ", git_should_force_push: {}", self.git_should_force_push)?;
+        write!(f, ", github_app_id: {}", self.github_app_id)?;
+        write!(f, ", github_app_installation_id: {}", self.github_app_installation_id)?;
+        write!(f, ", github_app_private_key: EncodingKey {{ ... }} ")?;
+        write!(f, ", github_repo_owner: \"{}\"", self.github_repo_owner)?;
+        write!(f, ", github_repo_name: \"{}\"", self.github_repo_name)?;
+        write!(f, " }}")?;
+        Ok(())
     }
 }

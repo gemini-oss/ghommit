@@ -190,7 +190,7 @@ fn commit_via_github_api(github_client: &GitHubClient, config: &Config, file_cha
 
 fn ghommit() -> Result<String, String> {
     let maybe_repo = git2::Repository::open(".");
-    let config = config::Config::gather_config(maybe_repo)?;
+    let config = Config::gather(maybe_repo)?;
 
     let status = git_status(&config.git_repo)?;
 
