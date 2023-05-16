@@ -116,8 +116,8 @@ impl GitHubClient {
     /// https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app
     pub fn get_access_token(&self, force_token_renewal: bool) -> Result<Arc<String>, String> {
         fn acquire_access_token(this: &GitHubClient) -> Result<create_an_installation_access_token::ResponseBody, String> {
-            let url = format!("{}/app/installations/{}/access_tokens", REST_API_BASE_URL, this.github_app_installation_id);
-            let response = this.make_api_request::<()>(&url, None, Some(AuthorizationTokenType::Jwt))?;
+            let path = format!("/app/installations/{}/access_tokens", this.github_app_installation_id);
+            let response = this.make_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
             GitHubClient::deserialize_expected_response(&this, response, &StatusCode::CREATED, "acquire an access token")
         }
 
@@ -205,7 +205,9 @@ impl GitHubClient {
         Ok(headers)
     }
 
-    fn make_api_request<T: Serialize + ?Sized>(&self, url: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+    fn make_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+        let url = format!("{}{}", REST_API_BASE_URL, path);
+
         let auth_token_type = match auth_token_type {
             Some(auth_token_type) => auth_token_type,
             None => AuthorizationTokenType::AccessToken,
@@ -312,35 +314,25 @@ impl GitHubClient {
         Ok(branch_exists)
     }
 
-    /// https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference
-    fn create_branch(&self, config: &Config) -> Result<(), String> {
-        let url = format!("{}/repos/{}/{}/git/refs", REST_API_BASE_URL, config.github_repo_owner, config.github_repo_name);
+    /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
+    fn create_a_reference(&self, config: &Config) -> Result<(), String> {
+        let path = format!("/repos/{}/{}/git/refs", config.github_repo_owner, config.github_repo_name);
 
         let payload = request::CreateBranch {
             reference: &format!("refs/heads/{}", config.git_branch_name),
             sha: &config.git_head_object_id,
         };
 
-        let response = self.make_api_request(&url, Some(&payload), None)?;
+        let response = self.make_api_request(&path, Some(&payload), None)?;
 
-        let status_code = response.status();
-
-        match status_code {
-            StatusCode::CREATED => Ok(()),
-            _ => {
-                match &response.text() {
-                    Ok(text) => Err(format!("Unexpected status code {} while creating branch: {}", status_code, text)),
-                    Err(_) => Err(format!("Unexpected status code {} while creating branch; body could not be decoded as text", status_code)),
-                }
-            }
-        }
+        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a branch")
     }
 
     fn ensure_branch_exists(&self, config: &Config) -> Result<(), String> {
         if self.does_branch_exist(config)? {
             Ok(())
         } else {
-            self.create_branch(config)
+            self.create_a_reference(config)
         }
     }
 
@@ -374,10 +366,8 @@ impl GitHubClient {
 
     /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
     pub fn create_a_blob(&self, config: &Config, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
-        let url = format!("{},/repos/{}/{}/git/blobs", REST_API_BASE_URL, config.github_repo_owner, config.github_repo_name);
-
-        let response = self.make_api_request(&url, Some(&payload), None)?;
-
+        let path = format!("/repos/{}/{}/git/blobs", config.github_repo_owner, config.github_repo_name);
+        let response = self.make_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")
     }
 }
