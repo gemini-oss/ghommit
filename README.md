@@ -36,3 +36,24 @@ ghommit --github-owner-and-repo 'gemini/example_repo' -m 'Adding to foo'
 # Produces target/release/ghommit
 cargo build --release
 ```
+
+## Testing
+
+```bash
+# - Note: Integration tests require the environment variables to be set
+#   - GHOMMIT_GITHUB_APP_ID
+#   - GHOMMIT_GITHUB_APP_INSTALLATION_ID
+#   - GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA
+
+# - Run the unit tests
+
+cargo test --lib
+
+# - Run the integration tests
+
+cargo test --test '*'
+
+# - Run all tests
+
+cargo test
+```

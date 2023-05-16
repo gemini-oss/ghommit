@@ -1,4 +1,5 @@
 use std::time::{SystemTime, Duration, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use reqwest::StatusCode;
@@ -8,16 +9,28 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::config::Config;
+use crate::github::rest_api::create_an_installation_access_token;
 
 use self::rest_api::create_a_blob;
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
 
+struct AccessToken {
+    token: Arc<String>,
+}
+
+impl AccessToken {
+    fn expires_soon(&self) -> bool {
+        false
+    }
+}
+
 pub struct GitHubClient {
     github_app_id: u64,
     github_app_installation_id: u64,
     github_app_private_key: EncodingKey,
+    github_access_token: Mutex<Option<AccessToken>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +66,7 @@ impl GitHubClient {
             github_app_id: github_app_id,
             github_app_installation_id: github_app_installation_id,
             github_app_private_key: github_app_private_key,
+            github_access_token: Mutex::new(None),
         }
     }
 
@@ -100,22 +114,40 @@ impl GitHubClient {
     }
 
     /// https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app
-    fn get_access_token(&self) -> Result<String, String> {
-        let url = format!("{}/app/installations/{}/access_tokens", REST_API_BASE_URL, self.github_app_installation_id);
+    pub fn get_access_token(&self, force_token_renewal: bool) -> Result<Arc<String>, String> {
+        fn acquire_access_token(this: &GitHubClient) -> Result<create_an_installation_access_token::ResponseBody, String> {
+            let url = format!("{}/app/installations/{}/access_tokens", REST_API_BASE_URL, this.github_app_installation_id);
+            let response = this.make_api_request::<()>(&url, None, Some(AuthorizationTokenType::Jwt))?;
+            GitHubClient::deserialize_expected_response(&this, response, &StatusCode::CREATED, "acquire an access token")
+        }
 
-        let response = self.make_api_request::<()>(&url, None, Some(AuthorizationTokenType::Jwt))?;
+        match self.github_access_token.lock() {
+            Ok(mut access_token_guard) => {
+                let should_update = force_token_renewal || match &*access_token_guard {
+                    Some(token) => token.expires_soon(),
+                    None => true,
+                };
 
-        let status_code = response.status();
+                if should_update {
+                    let raw_access_token = acquire_access_token(self)?;
 
-        match status_code {
-            StatusCode::CREATED => match response.json::<response::GitHubAccessToken>() {
-                Ok(access_token_res) => Ok(access_token_res.token),
-                Err(_) => Err("Unable to deserialize access token".to_owned()),
-            }
-            _ => match response.text() {
-                Ok(text) => Err(format!("Unexpected status code {} while acquiring access token: {}", status_code, text)),
-                Err(_) => Err(format!("Unexpected status code {} while acquiring access token; body could not be decoded as text", status_code)),
-            }
+                    let access_token = AccessToken {
+                        token: Arc::new(raw_access_token.token),
+                    };
+
+                    let return_token = access_token.token.clone();
+
+                    *access_token_guard = Some(access_token);
+
+                    Ok(return_token)
+                } else {
+                    match &*access_token_guard {
+                        Some(access_token) => Ok(Arc::clone(&access_token.token)),
+                        None => Err("Unexpected state: Access token is None".to_string()),
+                    }
+                }
+            },
+            Err(e) => Err(format!("Mutex poisoned unexpectedly: {}", e)),
         }
     }
 
@@ -126,12 +158,14 @@ impl GitHubClient {
     /// - `User-Agent`
     /// - `X-GitHub-Api-Version` (if using the REST API)
     fn base_headers(&self, api_type: GitHubApiType, auth_token_type: AuthorizationTokenType) -> Result<HeaderMap, String> {
-        let token_str = match auth_token_type {
-            AuthorizationTokenType::AccessToken => self.get_access_token()?,
-            AuthorizationTokenType::Jwt => self.get_jwt()?,
+        let token = match auth_token_type {
+            AuthorizationTokenType::AccessToken => self.get_access_token(false)?,
+            // - Creating an `Arc` is generally cheaper than cloning a `String`,
+            //   so simply wrap the JWT `String` in an `Arc`
+            AuthorizationTokenType::Jwt => Arc::new(self.get_jwt()?),
         };
 
-        let auth_header_value = match HeaderValue::from_str(&format!("Bearer {}", token_str)) {
+        let auth_header_value = match HeaderValue::from_str(&format!("Bearer {}", token)) {
             Ok(value) => value,
             Err(_) => Err("Unable to create header value with JWT string")?,
         };
@@ -374,6 +408,18 @@ pub mod rest_api {
         }
     }
 
+    pub mod create_an_installation_access_token {
+        use serde::Deserialize;
+
+        /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
+        ///
+        /// Abbreviated representation of the response body
+        #[derive(Debug, Deserialize)]
+        pub struct ResponseBody {
+            pub token: String,
+        }
+    }
+
     /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
     ///
     /// The entirety of GitHub's trees API uses snake case, so serde
@@ -602,15 +648,6 @@ pub mod response {
     #[serde(rename_all = "camelCase")]
     pub struct DoesBranchExistName {
         pub name: String,
-    }
-
-    // > GetGitHubAccessToken
-
-    /// Abbreviated representation of the access token response body
-    /// https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app
-    #[derive(Debug, Deserialize)]
-    pub struct GitHubAccessToken {
-        pub token: String,
     }
 }
 
