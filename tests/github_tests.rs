@@ -99,16 +99,19 @@ fn create_a_blob_binary() {
     let config = default_config();
     let github_client = default_github_client();
 
+    // printf '\x80' | base64
+    let first_invalid_utf8_byte_base64 = "gA==";
+    // printf '\x80' | git hash-object --stdin
+    let first_invalid_utf8_byte_git_hashed = "5416677bc7dab0c8bec3f5bf44d7d28b4ff73b13";
+
     let payload = create_a_blob::RequestBody {
-        // printf '\x80' | base64
-        content: "gA==",
+        content: first_invalid_utf8_byte_base64,
         encoding: create_a_blob::Encoding::Base64,
     };
 
     let response = github_client.create_a_blob(&config, &payload).unwrap();
 
-    // printf '\x80' | git hash-object --stdin
-    assert_eq!(response.sha, "5416677bc7dab0c8bec3f5bf44d7d28b4ff73b13");
+    assert_eq!(response.sha, first_invalid_utf8_byte_git_hashed);
 }
 
 #[test]
