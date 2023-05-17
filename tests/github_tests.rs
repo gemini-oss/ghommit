@@ -146,3 +146,9 @@ fn create_a_tree() {
     // - The request succeeding is good enough for now
     github_client.create_a_tree(&config, &payload).unwrap();
 }
+
+#[test]
+#[ignore]
+fn update_a_reference() {
+    assert!(false, "Not implemented")
+}

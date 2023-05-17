@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::github::rest_api::create_an_installation_access_token;
 
-use self::rest_api::{create_a_blob, create_a_tree, create_a_commit};
+use self::rest_api::{create_a_blob, create_a_tree, create_a_commit, update_a_reference};
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
@@ -122,7 +122,7 @@ impl GitHubClient {
         fn acquire_access_token(this: &GitHubClient) -> Result<create_an_installation_access_token::ResponseBody, String> {
             let path = format!("/app/installations/{}/access_tokens", this.github_app_installation_id);
             let response = this.post_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
-            GitHubClient::deserialize_expected_response(&this, response, &StatusCode::CREATED, "acquire an access token")
+            GitHubClient::deserialize_expected_response(this, response, &StatusCode::CREATED, "acquire an access token")
         }
 
         match self.github_access_token.lock() {
@@ -210,7 +210,7 @@ impl GitHubClient {
         Ok(headers)
     }
 
-    fn post_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+    fn make_api_request<T: Serialize + ?Sized>(&self, http_method: reqwest::Method, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
         let url = format!("{}{}", REST_API_BASE_URL, path);
 
         let auth_token_type = match auth_token_type {
@@ -220,7 +220,7 @@ impl GitHubClient {
 
         let http_client = self.get_http_client(None)?;
         let headers = self.base_headers(GitHubApiType::Rest, auth_token_type)?;
-        let request = http_client.post(url).headers(headers);
+        let request = http_client.request(http_method, url).headers(headers);
 
         let request = match json {
             Some(json) => request.json(&json),
@@ -231,6 +231,14 @@ impl GitHubClient {
             Ok(response) => Ok(response),
             Err(e) => Err(format!("Request failed: {}", e)),
         }
+    }
+
+    fn post_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+        self.make_api_request(reqwest::Method::POST, path, json, auth_token_type)
+    }
+
+    fn patch_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+        self.make_api_request(reqwest::Method::PATCH, path, json, auth_token_type)
     }
 
     fn deserialize_expected_response<R: DeserializeOwned>(&self, response: Response, expected_status_code: &StatusCode, operation: &str) -> Result<R, String> {
@@ -388,6 +396,15 @@ impl GitHubClient {
         let path = format!("/repos/{}/{}/git/commits", config.github_repo_owner, config.github_repo_name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")
+    }
+
+    /// [Update a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference)
+    ///
+    /// - Note: This assumes that the ref is a head
+    pub fn update_a_reference(&self, config: &Config, payload: &update_a_reference::RequestBody) -> Result<update_a_reference::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/refs/heads/{}", config.github_repo_owner, config.github_repo_name, config.git_branch_name);
+        let response = self.patch_api_request(&path, Some(&payload), None)?;
+        self.deserialize_expected_response(response, &StatusCode::OK, "update a reference")
     }
 }
 
@@ -547,6 +564,34 @@ pub mod rest_api {
         pub struct ResponseBody {
             pub sha: String,
             pub truncated: bool,
+            pub url: String,
+        }
+    }
+
+    /// [Update a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference)
+    pub mod update_a_reference {
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Serialize)]
+        pub struct RequestBody {
+            pub sha: String,
+            pub force: bool,
+        }
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct ResponseBody {
+            #[serde(rename = "ref")]
+            pub reference: String,
+            pub node_id: String,
+            pub url: String,
+            pub object: Object,
+        }
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct Object {
+            #[serde(rename = "type")]
+            pub object_type: String,
+            pub sha: String,
             pub url: String,
         }
     }
@@ -1157,5 +1202,62 @@ mod create_a_tree_tests {
         };
 
         assert_eq_deserialized(&actual, &expected);
+    }
+}
+
+#[cfg(test)]
+mod update_a_reference_tests {
+    use super::rest_api::update_a_reference::{RequestBody, ResponseBody, Object};
+    use super::test_util::assert_eq_deserialized;
+
+    #[test]
+    fn update_a_reference_serialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference
+        let expected = r#"{"sha":"aa218f56b14c9653891f9e74264a383fa43fefbd","force":true}"#;
+
+        let actual = {
+            let actual_deserialized = RequestBody {
+                sha: "aa218f56b14c9653891f9e74264a383fa43fefbd".to_string(),
+                force: true,
+            };
+
+            serde_json::to_string(&actual_deserialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, expected);
+    }
+
+    #[test]
+    fn update_a_reference_deserialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference
+        let expected = r#"
+            {
+              "ref": "refs/heads/featureA",
+              "node_id": "MDM6UmVmcmVmcy9oZWFkcy9mZWF0dXJlQQ==",
+              "url": "https://api.github.com/repos/octocat/Hello-World/git/refs/heads/featureA",
+              "object": {
+                "type": "commit",
+                "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd",
+                "url": "https://api.github.com/repos/octocat/Hello-World/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd"
+              }
+            }
+        "#;
+
+        let actual = {
+            let actual_deserialized = ResponseBody {
+                reference: "refs/heads/featureA".to_string(),
+                node_id: "MDM6UmVmcmVmcy9oZWFkcy9mZWF0dXJlQQ==".to_string(),
+                url: "https://api.github.com/repos/octocat/Hello-World/git/refs/heads/featureA".to_string(),
+                object: Object {
+                    object_type: "commit".to_string(),
+                    sha: "aa218f56b14c9653891f9e74264a383fa43fefbd".to_string(),
+                    url: "https://api.github.com/repos/octocat/Hello-World/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd".to_string(),
+                },
+            };
+
+            serde_json::to_string(&actual_deserialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, expected);
     }
 }
