@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::github::rest_api::create_an_installation_access_token;
 
-use self::rest_api::{create_a_blob, create_a_tree, create_a_commit, update_a_reference};
+use self::rest_api::{create_a_blob, create_a_tree, create_a_commit, get_a_reference, update_a_reference};
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
@@ -233,6 +233,11 @@ impl GitHubClient {
         }
     }
 
+    fn get_api_request(&self, path: &str, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+        // - The unit type turbofish is necessary to satisfy the type checker
+        self.make_api_request::<()>(reqwest::Method::GET, path, None, auth_token_type)
+    }
+
     fn post_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
         self.make_api_request(reqwest::Method::POST, path, json, auth_token_type)
     }
@@ -241,14 +246,20 @@ impl GitHubClient {
         self.make_api_request(reqwest::Method::PATCH, path, json, auth_token_type)
     }
 
+    fn unexpected_status_code_error_message(response: Response, operation: &str) -> String {
+        let status_code = response.status();
+
+        match &response.text() {
+            Ok(text) => format!("Unexpected status code {} while {}: {}", status_code, operation, text),
+            Err(_) => format!("Unexpected status code {} while {}; body could not be decoded as text", status_code, operation),
+        }
+    }
+
     fn deserialize_expected_response<R: DeserializeOwned>(&self, response: Response, expected_status_code: &StatusCode, operation: &str) -> Result<R, String> {
         let status_code = response.status();
 
         if &status_code != expected_status_code {
-            return match &response.text() {
-                Ok(text) => Err(format!("Unexpected status code {} while {}: {}", status_code, operation, text)),
-                Err(_) => Err(format!("Unexpected status code {} while {}; body could not be decoded as text", status_code, operation)),
-            }
+            return Err(Self::unexpected_status_code_error_message(response, operation))
         }
 
         // - Read as text before deserializing to a struct since `.text()` and
@@ -396,6 +407,30 @@ impl GitHubClient {
         let path = format!("/repos/{}/{}/git/commits", config.github_repo_owner, config.github_repo_name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")
+    }
+
+    /// [Get a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
+    ///
+    /// - Note: This assumes that the ref is a head
+    pub fn get_a_reference(&self, config: &Config) -> Result<get_a_reference::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/refs/heads/{}", config.github_repo_owner, config.github_repo_name, config.git_branch_name);
+        let response = self.get_api_request(&path, None)?;
+
+        let operation = "get a reference";
+
+        let status_code = response.status();
+
+        match status_code {
+            StatusCode::OK => {
+                let success_body = self.deserialize_expected_response(response, &status_code, operation)?;
+                Ok(get_a_reference::ResponseBody::Ok(success_body))
+            },
+            StatusCode::NOT_FOUND => {
+                let failure_body = self.deserialize_expected_response(response, &status_code, operation)?;
+                Ok(get_a_reference::ResponseBody::NotFound(failure_body))
+            }
+            _ => Err(Self::unexpected_status_code_error_message(response, operation)),
+        }
     }
 
     /// [Update a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference)
@@ -568,9 +603,30 @@ pub mod rest_api {
         }
     }
 
+    /// [Get a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
+    pub mod get_a_reference {
+        use serde::{Deserialize, Serialize};
+
+        use super::shared;
+
+        pub type ResponseBodyOk = shared::ReferenceResponseBody;
+        pub type Object = shared::ReferenceResponseBodyObject;
+
+        /// Abbreviated representation of the response body
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct ResponseBodyNotFound {}
+
+        pub enum ResponseBody {
+            Ok(ResponseBodyOk),
+            NotFound(ResponseBodyNotFound),
+        }
+    }
+
     /// [Update a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference)
     pub mod update_a_reference {
-        use serde::{Deserialize, Serialize};
+        use serde::Serialize;
+
+        use super::shared;
 
         #[derive(Debug, Serialize)]
         pub struct RequestBody {
@@ -578,17 +634,24 @@ pub mod rest_api {
             pub force: bool,
         }
 
+        pub type ResponseBody = shared::ReferenceResponseBody;
+        pub type Object = shared::ReferenceResponseBodyObject;
+    }
+
+    pub mod shared {
+        use serde::{Deserialize, Serialize};
+
         #[derive(Debug, Deserialize, Serialize)]
-        pub struct ResponseBody {
+        pub struct ReferenceResponseBody {
             #[serde(rename = "ref")]
             pub reference: String,
             pub node_id: String,
             pub url: String,
-            pub object: Object,
+            pub object: ReferenceResponseBodyObject,
         }
 
         #[derive(Debug, Deserialize, Serialize)]
-        pub struct Object {
+        pub struct ReferenceResponseBodyObject {
             #[serde(rename = "type")]
             pub object_type: String,
             pub sha: String,
@@ -1206,8 +1269,33 @@ mod create_a_tree_tests {
 }
 
 #[cfg(test)]
+mod get_a_reference_tests {
+    use super::rest_api::get_a_reference::ResponseBodyNotFound;
+    use super::test_util::assert_eq_deserialized;
+
+    #[test]
+    fn not_found_deserialization() {
+        let actual = {
+            let original = r#"{"message":"Not Found","documentation_url":"https://docs.github.com/rest/reference/git#get-a-reference"}"#;
+
+            let actual_deserialized = serde_json::from_str::<ResponseBodyNotFound>(&original).unwrap();
+
+            serde_json::to_string(&actual_deserialized).unwrap()
+        };
+
+        let expected = {
+            let expected_deserialized = ResponseBodyNotFound {};
+
+            serde_json::to_string(&expected_deserialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, &expected);
+    }
+}
+
+#[cfg(test)]
 mod update_a_reference_tests {
-    use super::rest_api::update_a_reference::{RequestBody, ResponseBody, Object};
+    use super::rest_api::update_a_reference::RequestBody;
     use super::test_util::assert_eq_deserialized;
 
     #[test]
@@ -1226,10 +1314,19 @@ mod update_a_reference_tests {
 
         assert_eq_deserialized(&actual, expected);
     }
+}
+
+#[cfg(test)]
+mod shared_tests {
+    use super::rest_api::shared::{ReferenceResponseBody, ReferenceResponseBodyObject};
+    use super::test_util::assert_eq_deserialized;
 
     #[test]
-    fn update_a_reference_deserialization_with_github_example_payload() {
-        // From the docs: https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference
+    fn reference_deserialization_with_github_example_payload() {
+        // From the docs:
+        // - https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference
+        // - https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference
+        // - https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference
         let expected = r#"
             {
               "ref": "refs/heads/featureA",
@@ -1244,11 +1341,11 @@ mod update_a_reference_tests {
         "#;
 
         let actual = {
-            let actual_deserialized = ResponseBody {
+            let actual_deserialized = ReferenceResponseBody {
                 reference: "refs/heads/featureA".to_string(),
                 node_id: "MDM6UmVmcmVmcy9oZWFkcy9mZWF0dXJlQQ==".to_string(),
                 url: "https://api.github.com/repos/octocat/Hello-World/git/refs/heads/featureA".to_string(),
-                object: Object {
+                object: ReferenceResponseBodyObject {
                     object_type: "commit".to_string(),
                     sha: "aa218f56b14c9653891f9e74264a383fa43fefbd".to_string(),
                     url: "https://api.github.com/repos/octocat/Hello-World/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd".to_string(),
