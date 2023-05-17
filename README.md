@@ -40,10 +40,16 @@ cargo build --release
 ## Testing
 
 ```bash
-# - Note: Integration tests require the environment variables to be set
-#   - GHOMMIT_GITHUB_APP_ID
-#   - GHOMMIT_GITHUB_APP_INSTALLATION_ID
-#   - GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA
+# - Integration tests require several environment variables to be set:
+#   - Normal environment variables:
+#     - GHOMMIT_GITHUB_APP_ID
+#     - GHOMMIT_GITHUB_APP_INSTALLATION_ID
+#     - GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA
+#   - Test environment variables
+#     - GHOMMIT_TEST_COMMIT_MESSAGE
+#     - GHOMMIT_TEST_GITHUB_REPO_OWNER
+#     - GHOMMIT_TEST_GITHUB_REPO_NAME
+#     - GHOMMIT_TEST_REPO_PATH
 
 # - Run the unit tests
 
