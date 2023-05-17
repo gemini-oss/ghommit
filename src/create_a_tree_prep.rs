@@ -241,8 +241,34 @@ mod create_a_tree_prep_tests {
     }
 
     #[test]
+    fn read_git_object_binary() {
+        let repo = TempGitRepo::new();
+
+        let foo_path = "foo";
+        let foo_contents = &[0x80];
+        let foo = repo.create_or_replace_blob_file(foo_path, foo_contents);
+
+        repo.git_add(&foo);
+
+        let status = git_status(&repo.repo)
+            .expect("Unable to get a git status");
+
+        let contents = read_git_object(&repo.repo, &status, foo_path);
+
+        match contents {
+            ObjectContents::Text(_) => panic!("Expected ObjectContents::Base64, but found ObjectContents::Text"),
+            ObjectContents::Base64(actual) => {
+                // printf '\x80' | base64
+                let expected = "gA==";
+
+                assert_eq!(actual, expected);
+            },
+        }
+    }
+
+    #[test]
     #[cfg(unix)]
-    fn read_symlink_test() {
+    fn read_git_object_symlink() {
         let repo = TempGitRepo::new();
 
         let foo_path = "foo";
