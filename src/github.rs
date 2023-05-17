@@ -1,6 +1,7 @@
 use std::time::{SystemTime, Duration, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use reqwest::StatusCode;
 use reqwest::blocking::Response;
@@ -18,11 +19,14 @@ const REST_API_BASE_URL: &str = "https://api.github.com";
 
 struct AccessToken {
     token: Arc<String>,
+    expires_at: DateTime<Utc>,
 }
 
 impl AccessToken {
     fn expires_soon(&self) -> bool {
-        false
+        let two_minutes_from_now = Utc::now() + chrono::Duration::minutes(2);
+
+        self.expires_at < two_minutes_from_now
     }
 }
 
@@ -113,7 +117,7 @@ impl GitHubClient {
         }
     }
 
-    /// https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app
+    /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
     pub fn get_access_token(&self, force_token_renewal: bool) -> Result<Arc<String>, String> {
         fn acquire_access_token(this: &GitHubClient) -> Result<create_an_installation_access_token::ResponseBody, String> {
             let path = format!("/app/installations/{}/access_tokens", this.github_app_installation_id);
@@ -133,6 +137,7 @@ impl GitHubClient {
 
                     let access_token = AccessToken {
                         token: Arc::new(raw_access_token.token),
+                        expires_at: raw_access_token.expires_at,
                     };
 
                     let return_token = access_token.token.clone();
@@ -399,7 +404,8 @@ pub mod rest_api {
     }
 
     pub mod create_an_installation_access_token {
-        use serde::Deserialize;
+        use chrono::{DateTime, Utc};
+        use serde::{Deserialize, Deserializer};
 
         /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
         ///
@@ -407,6 +413,19 @@ pub mod rest_api {
         #[derive(Debug, Deserialize)]
         pub struct ResponseBody {
             pub token: String,
+            #[serde(deserialize_with = "deserialize_datetime")]
+            pub expires_at: DateTime<Utc>,
+        }
+
+        fn deserialize_datetime<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+
+            DateTime::parse_from_rfc3339(&s)
+                .map_err(serde::de::Error::custom)
+                .map(|dt| dt.into())
         }
     }
 
@@ -659,6 +678,37 @@ mod test_util {
     }
 
 }
+
+
+#[cfg(test)]
+mod access_token_tests {
+    use std::sync::Arc;
+
+    use chrono::{Utc, Duration};
+
+    use super::AccessToken;
+
+    #[test]
+    fn expires_soon() {
+        let access_token = AccessToken {
+            token: Arc::new("".to_string()),
+            expires_at: Utc::now(),
+        };
+
+        assert!(access_token.expires_soon())
+    }
+
+    #[test]
+    fn does_not_expire_soon() {
+        let access_token = AccessToken {
+            token: Arc::new("".to_string()),
+            expires_at: Utc::now() + Duration::minutes(5),
+        };
+
+        assert!(!access_token.expires_soon())
+    }
+}
+
 #[cfg(test)]
 mod create_a_blob_tests {
     use super::rest_api::create_a_blob::{Encoding, RequestBody, ResponseBody};
