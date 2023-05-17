@@ -37,6 +37,13 @@ ghommit --github-owner-and-repo 'gemini/example_repo' -m 'Adding to foo'
 cargo build --release
 ```
 
+### Building for Linux on a Mac
+
+```bash
+# - Until cross-compilation is sorted, do it in Docker
+docker run --rm -it -v "${PWD}:/host" --workdir '/host' rust:bullseye cargo build --release
+```
+
 ## Testing
 
 ```bash
