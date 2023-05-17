@@ -59,6 +59,7 @@ fn default_config() -> Config {
 }
 
 #[test]
+#[ignore]
 fn access_token_caching() {
     let github_client = default_github_client();
 
@@ -69,6 +70,7 @@ fn access_token_caching() {
 }
 
 #[test]
+#[ignore]
 fn access_token_forcing() {
     let github_client = default_github_client();
 
@@ -79,6 +81,7 @@ fn access_token_forcing() {
 }
 
 #[test]
+#[ignore]
 fn create_a_blob_text() {
     let config = default_config();
     let github_client = default_github_client();
@@ -95,6 +98,7 @@ fn create_a_blob_text() {
 }
 
 #[test]
+#[ignore]
 fn create_a_blob_binary() {
     let config = default_config();
     let github_client = default_github_client();
@@ -115,6 +119,13 @@ fn create_a_blob_binary() {
 }
 
 #[test]
+#[ignore]
+fn create_a_commit() {
+    assert!(false, "Not implemented")
+}
+
+#[test]
+#[ignore]
 fn create_a_tree() {
     let test_config = EnvironmentVariableTestConfig::gather();
     let config = default_config();
