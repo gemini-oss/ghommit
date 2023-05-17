@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::github::rest_api::create_an_installation_access_token;
 
-use self::rest_api::create_a_blob;
+use self::rest_api::{create_a_blob, create_a_tree};
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
@@ -375,6 +375,13 @@ impl GitHubClient {
         let response = self.make_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")
     }
+
+    /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
+    pub fn create_a_tree(&self, config: &Config, payload: &create_a_tree::RequestBody) -> Result<create_a_tree::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/trees", config.github_repo_owner, config.github_repo_name);
+        let response = self.make_api_request(&path, Some(&payload), None)?;
+        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a tree")
+    }
 }
 
 pub mod rest_api {
@@ -434,7 +441,7 @@ pub mod rest_api {
     /// The entirety of GitHub's trees API uses snake case, so serde
     /// renaming is only necessary for enum variants that derive `Serialize`
     pub mod create_a_tree {
-        use serde::{Serialize, Serializer};
+        use serde::{Deserialize, Serialize, Serializer};
         use serde::ser::SerializeStruct;
 
         #[derive(Debug, Serialize)]
@@ -502,6 +509,14 @@ pub mod rest_api {
 
                 state.end()
             }
+        }
+
+        /// Abbreviated representation of the response body
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct ResponseBody {
+            pub sha: String,
+            pub truncated: bool,
+            pub url: String,
         }
     }
 }
@@ -772,7 +787,7 @@ mod create_a_blob_tests {
 
 #[cfg(test)]
 mod create_a_tree_tests {
-    use super::rest_api::create_a_tree::{FileMode, NodeType, RequestBody, ShaOrContent, TreeNode};
+    use super::rest_api::create_a_tree::{FileMode, NodeType, RequestBody, ResponseBody, ShaOrContent, TreeNode};
     use super::test_util::{assert_eq_deserialized, quote};
 
     fn manual_file_mode_to_json_string(file_mode: &FileMode) -> String {
@@ -976,5 +991,45 @@ mod create_a_tree_tests {
         let actual = serde_json::to_string(&actual_payload).unwrap();
 
         assert_eq_deserialized(&actual, expected);
+    }
+
+    #[test]
+    fn create_a_tree_deserialization_with_github_example_payload() {
+        let actual = {
+            // From the docs: https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree
+            let original = r#"
+                {
+                  "sha": "cd8274d15fa3ae2ab983129fb037999f264ba9a7",
+                  "url": "https://api.github.com/repos/octocat/Hello-World/trees/cd8274d15fa3ae2ab983129fb037999f264ba9a7",
+                  "tree": [
+                    {
+                      "path": "file.rb",
+                      "mode": "100644",
+                      "type": "blob",
+                      "size": 132,
+                      "sha": "7c258a9869f33c1e1e1f74fbb32f07c86cb5a75b",
+                      "url": "https://api.github.com/repos/octocat/Hello-World/git/blobs/7c258a9869f33c1e1e1f74fbb32f07c86cb5a75b"
+                    }
+                  ],
+                  "truncated": true
+                }
+            "#;
+
+            let actual_deserialized = serde_json::from_str::<ResponseBody>(&original).unwrap();
+
+            serde_json::to_string(&actual_deserialized).unwrap()
+        };
+
+        let expected = {
+            let expected_deserialized = ResponseBody {
+                sha: "cd8274d15fa3ae2ab983129fb037999f264ba9a7".to_string(),
+                truncated: true,
+                url: "https://api.github.com/repos/octocat/Hello-World/trees/cd8274d15fa3ae2ab983129fb037999f264ba9a7".to_string(),
+            };
+
+            serde_json::to_string(&expected_deserialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, &expected);
     }
 }

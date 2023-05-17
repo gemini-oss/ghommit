@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use ghommit::config::{CommandLineArguments, Config, EnvironmentVariableConfig, GitConfig};
 use ghommit::github::GitHubClient;
-use ghommit::github::rest_api::create_a_blob;
+use ghommit::github::rest_api::{create_a_blob, create_a_tree};
 
 struct EnvironmentVariableTestConfig {
+    base_tree_id: String,
     commit_message: String,
     repo_path: String,
     github_repo_owner: String,
@@ -22,6 +23,7 @@ impl EnvironmentVariableTestConfig {
 
     pub fn gather() -> EnvironmentVariableTestConfig {
         EnvironmentVariableTestConfig {
+            base_tree_id: Self::environment_variable("GHOMMIT_TEST_BASE_TREE_ID"),
             commit_message: Self::environment_variable("GHOMMIT_TEST_COMMIT_MESSAGE"),
             repo_path: Self::environment_variable("GHOMMIT_TEST_REPO_PATH"),
             github_repo_owner: Self::environment_variable("GHOMMIT_TEST_GITHUB_REPO_OWNER"),
@@ -107,4 +109,26 @@ fn create_a_blob_binary() {
 
     // printf '\x80' | git hash-object --stdin
     assert_eq!(response.sha, "5416677bc7dab0c8bec3f5bf44d7d28b4ff73b13");
+}
+
+#[test]
+fn create_a_tree() {
+    let test_config = EnvironmentVariableTestConfig::gather();
+    let config = default_config();
+    let github_client = default_github_client();
+
+    let payload = create_a_tree::RequestBody {
+        base_tree: test_config.base_tree_id,
+        tree: vec![
+            create_a_tree::TreeNode {
+                path: "foo".to_owned(),
+                file_mode: create_a_tree::FileMode::Blob,
+                node_type: create_a_tree::NodeType::Blob,
+                sha_or_content: create_a_tree::ShaOrContent::Content("foo\n".to_owned()),
+            },
+        ],
+    };
+
+    // - The request succeeding is good enough for now
+    github_client.create_a_tree(&config, &payload).unwrap();
 }

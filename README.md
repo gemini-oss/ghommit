@@ -40,22 +40,21 @@ cargo build --release
 ## Testing
 
 ```bash
-# - Integration tests require several environment variables to be set:
+# - Run the unit tests (probably what you want)
+
+cargo test --lib
+
+# - Run the integration tests, which require several environment variables:
 #   - Normal environment variables:
 #     - GHOMMIT_GITHUB_APP_ID
 #     - GHOMMIT_GITHUB_APP_INSTALLATION_ID
 #     - GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA
 #   - Test environment variables
+#     - GHOMMIT_TEST_BASE_TREE_ID
 #     - GHOMMIT_TEST_COMMIT_MESSAGE
 #     - GHOMMIT_TEST_GITHUB_REPO_OWNER
 #     - GHOMMIT_TEST_GITHUB_REPO_NAME
 #     - GHOMMIT_TEST_REPO_PATH
-
-# - Run the unit tests
-
-cargo test --lib
-
-# - Run the integration tests
 
 cargo test --test '*'
 
