@@ -421,7 +421,8 @@ pub mod rest_api {
     pub mod create_a_commit {
         use serde::{Deserialize, Serialize};
 
-        #[derive(Debug, Serialize)]
+        /// Abbreviated representation of the response body
+        #[derive(Debug, Deserialize, Serialize)]
         pub struct RequestBody {
             pub message: String,
             pub parents: Vec<String>,
@@ -441,12 +442,11 @@ pub mod rest_api {
         }
     }
 
+    /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
     pub mod create_an_installation_access_token {
         use chrono::{DateTime, Utc};
         use serde::{Deserialize, Deserializer};
 
-        /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
-        ///
         /// Abbreviated representation of the response body
         #[derive(Debug, Deserialize)]
         pub struct ResponseBody {
@@ -813,6 +813,101 @@ mod create_a_blob_tests {
         let actual = serde_json::to_string(&actual_payload).unwrap();
 
         assert_eq_deserialized(&actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod create_a_commit_tests {
+    use crate::github::rest_api::create_a_commit::RequestBody;
+    use crate::github::test_util::assert_eq_deserialized;
+
+    use super::rest_api::create_a_commit::{ResponseBody, Verification};
+
+    #[test]
+    fn create_a_commit_serialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit
+        let original_payload = r#"{"message":"my commit message","author":{"name":"Mona Octocat","email":"octocat@github.com","date":"2008-07-09T16:13:30+12:00"},"parents":["7d1b31e74ee336d15cbd21741bc88a537ed063a0"],"tree":"827efc6d56897b048c772eb4087f854f46256132","signature":"-----BEGIN PGP SIGNATURE-----\n\niQIzBAABAQAdFiEESn/54jMNIrGSE6Tp6cQjvhfv7nAFAlnT71cACgkQ6cQjvhfv\n7nCWwA//XVqBKWO0zF+bZl6pggvky3Oc2j1pNFuRWZ29LXpNuD5WUGXGG209B0hI\nDkmcGk19ZKUTnEUJV2Xd0R7AW01S/YSub7OYcgBkI7qUE13FVHN5ln1KvH2all2n\n2+JCV1HcJLEoTjqIFZSSu/sMdhkLQ9/NsmMAzpf/iIM0nQOyU4YRex9eD1bYj6nA\nOQPIDdAuaTQj1gFPHYLzM4zJnCqGdRlg0sOM/zC5apBNzIwlgREatOYQSCfCKV7k\nnrU34X8b9BzQaUx48Qa+Dmfn5KQ8dl27RNeWAqlkuWyv3pUauH9UeYW+KyuJeMkU\n+NyHgAsWFaCFl23kCHThbLStMZOYEnGagrd0hnm1TPS4GJkV4wfYMwnI4KuSlHKB\njHl3Js9vNzEUQipQJbgCgTiWvRJoK3ENwBTMVkKHaqT4x9U4Jk/XZB6Q8MA09ezJ\n3QgiTjTAGcum9E9QiJqMYdWQPWkaBIRRz5cET6HPB48YNXAAUsfmuYsGrnVLYbG+\nUpC6I97VybYHTy2O9XSGoaLeMI9CsFn38ycAxxbWagk5mhclNTP5mezIq6wKSwmr\nX11FW3n1J23fWZn5HJMBsRnUCgzqzX3871IqLYHqRJ/bpZ4h20RhTyPj5c/z7QXp\neSakNQMfbbMcljkha+ZMuVQX1K9aRlVqbmv3ZMWh+OijLYVU2bc=\n=5Io4\n-----END PGP SIGNATURE-----\n"}"#;
+
+        let actual = {
+            // - Deserialize and reserialize since `RequestBody` is an
+            //   abbreviated representation
+            let actual_deserialized = serde_json::from_str::<RequestBody>(&original_payload).unwrap();
+
+            serde_json::to_string(&actual_deserialized).unwrap()
+        };
+
+        let expected = {
+            let expected_deserialized = RequestBody {
+                message: "my commit message".to_string(),
+                parents: vec!["7d1b31e74ee336d15cbd21741bc88a537ed063a0".to_string()],
+                tree: "827efc6d56897b048c772eb4087f854f46256132".to_string(),
+            };
+
+            serde_json::to_string(&expected_deserialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, &expected);
+    }
+
+    #[test]
+    fn create_a_commit_deserialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit
+        let original_payload = r#"
+            {
+              "sha": "7638417db6d59f3c431d3e1f261cc637155684cd",
+              "node_id": "MDY6Q29tbWl0NzYzODQxN2RiNmQ1OWYzYzQzMWQzZTFmMjYxY2M2MzcxNTU2ODRjZA==",
+              "url": "https://api.github.com/repos/octocat/Hello-World/git/commits/7638417db6d59f3c431d3e1f261cc637155684cd",
+              "author": {
+                "date": "2014-11-07T22:01:45Z",
+                "name": "Monalisa Octocat",
+                "email": "octocat@github.com"
+              },
+              "committer": {
+                "date": "2014-11-07T22:01:45Z",
+                "name": "Monalisa Octocat",
+                "email": "octocat@github.com"
+              },
+              "message": "my commit message",
+              "tree": {
+                "url": "https://api.github.com/repos/octocat/Hello-World/git/trees/827efc6d56897b048c772eb4087f854f46256132",
+                "sha": "827efc6d56897b048c772eb4087f854f46256132"
+              },
+              "parents": [
+                {
+                  "url": "https://api.github.com/repos/octocat/Hello-World/git/commits/7d1b31e74ee336d15cbd21741bc88a537ed063a0",
+                  "sha": "7d1b31e74ee336d15cbd21741bc88a537ed063a0",
+                  "html_url": "https://github.com/octocat/Hello-World/commit/7d1b31e74ee336d15cbd21741bc88a537ed063a0"
+                }
+              ],
+              "verification": {
+                "verified": false,
+                "reason": "unsigned",
+                "signature": null,
+                "payload": null
+              },
+              "html_url": "https://github.com/octocat/Hello-World/commit/7638417db6d59f3c431d3e1f261cc637155684cd"
+            }
+        "#;
+
+        let actual = {
+            let actual_serialized = serde_json::from_str::<ResponseBody>(&original_payload).unwrap();
+
+            serde_json::to_string(&actual_serialized).unwrap()
+        };
+
+        let expected = {
+            let expected_serialized = ResponseBody {
+                sha: "7638417db6d59f3c431d3e1f261cc637155684cd".to_string(),
+                html_url: "https://github.com/octocat/Hello-World/commit/7638417db6d59f3c431d3e1f261cc637155684cd".to_string(),
+                verification: Verification {
+                    verified: false,
+                },
+            };
+
+            serde_json::to_string(&expected_serialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, &expected);
     }
 }
 
