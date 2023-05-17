@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::github::rest_api::create_an_installation_access_token;
 
-use self::rest_api::{create_a_blob, create_a_tree};
+use self::rest_api::{create_a_blob, create_a_tree, create_a_commit};
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
@@ -121,7 +121,7 @@ impl GitHubClient {
     pub fn get_access_token(&self, force_token_renewal: bool) -> Result<Arc<String>, String> {
         fn acquire_access_token(this: &GitHubClient) -> Result<create_an_installation_access_token::ResponseBody, String> {
             let path = format!("/app/installations/{}/access_tokens", this.github_app_installation_id);
-            let response = this.make_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
+            let response = this.post_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
             GitHubClient::deserialize_expected_response(&this, response, &StatusCode::CREATED, "acquire an access token")
         }
 
@@ -210,7 +210,7 @@ impl GitHubClient {
         Ok(headers)
     }
 
-    fn make_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
+    fn post_api_request<T: Serialize + ?Sized>(&self, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
         let url = format!("{}{}", REST_API_BASE_URL, path);
 
         let auth_token_type = match auth_token_type {
@@ -328,7 +328,7 @@ impl GitHubClient {
             sha: &config.git_head_object_id,
         };
 
-        let response = self.make_api_request(&path, Some(&payload), None)?;
+        let response = self.post_api_request(&path, Some(&payload), None)?;
 
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a branch")
     }
@@ -372,15 +372,22 @@ impl GitHubClient {
     /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
     pub fn create_a_blob(&self, config: &Config, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
         let path = format!("/repos/{}/{}/git/blobs", config.github_repo_owner, config.github_repo_name);
-        let response = self.make_api_request(&path, Some(&payload), None)?;
+        let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")
     }
 
     /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
     pub fn create_a_tree(&self, config: &Config, payload: &create_a_tree::RequestBody) -> Result<create_a_tree::ResponseBody, String> {
         let path = format!("/repos/{}/{}/git/trees", config.github_repo_owner, config.github_repo_name);
-        let response = self.make_api_request(&path, Some(&payload), None)?;
+        let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a tree")
+    }
+
+    /// [Create a commit](https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit)
+    pub fn create_a_commit(&self, config: &Config, payload: &create_a_commit::RequestBody) -> Result<create_a_commit::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/commits", config.github_repo_owner, config.github_repo_name);
+        let response = self.post_api_request(&path, Some(&payload), None)?;
+        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")
     }
 }
 
@@ -407,6 +414,30 @@ pub mod rest_api {
         pub struct ResponseBody {
             pub url: String,
             pub sha: String,
+        }
+    }
+
+    /// [Create a commit](https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit)
+    pub mod create_a_commit {
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Serialize)]
+        pub struct RequestBody {
+            pub message: String,
+            pub parents: Vec<String>,
+            pub tree: String,
+        }
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct ResponseBody {
+            pub sha: String,
+            pub html_url: String,
+            pub verification: Verification,
+        }
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct Verification {
+            pub verified: bool,
         }
     }
 
