@@ -126,6 +126,12 @@ fn create_a_commit() {
 
 #[test]
 #[ignore]
+fn create_a_reference() {
+    assert!(false, "Not implemented")
+}
+
+#[test]
+#[ignore]
 fn create_a_tree() {
     let test_config = EnvironmentVariableTestConfig::gather();
     let config = default_config();

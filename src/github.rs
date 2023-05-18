@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::github::rest_api::create_an_installation_access_token;
 
-use self::rest_api::{create_a_blob, create_a_tree, create_a_commit, get_a_reference, update_a_reference};
+use self::rest_api::{create_a_blob, create_a_commit, create_a_reference, create_a_tree, get_a_reference, update_a_reference};
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const REST_API_BASE_URL: &str = "https://api.github.com";
@@ -339,7 +339,7 @@ impl GitHubClient {
     }
 
     /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
-    fn create_a_reference(&self, config: &Config) -> Result<(), String> {
+    fn create_a_reference_original(&self, config: &Config) -> Result<(), String> {
         let path = format!("/repos/{}/{}/git/refs", config.github_repo_owner, config.github_repo_name);
 
         let payload = request::CreateBranch {
@@ -356,7 +356,7 @@ impl GitHubClient {
         if self.does_branch_exist(config)? {
             Ok(())
         } else {
-            self.create_a_reference(config)
+            self.create_a_reference_original(config)
         }
     }
 
@@ -407,6 +407,15 @@ impl GitHubClient {
         let path = format!("/repos/{}/{}/git/commits", config.github_repo_owner, config.github_repo_name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")
+    }
+
+    /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
+    ///
+    /// - Note: This assumes that the ref is a head
+    pub fn create_a_reference(&self, config: &Config, payload: &create_a_reference::RequestBody) -> Result<create_a_reference::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/refs", config.github_repo_owner, config.github_repo_name);
+        let response = self.post_api_request(&path, Some(&payload), None)?;
+        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a reference")
     }
 
     /// [Get a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
@@ -492,6 +501,24 @@ pub mod rest_api {
         pub struct Verification {
             pub verified: bool,
         }
+    }
+
+
+    /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
+    pub mod create_a_reference {
+        use serde::{Deserialize, Serialize};
+
+        use super::shared;
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct RequestBody {
+            #[serde(rename = "ref")]
+            pub reference: String,
+            pub sha: String,
+        }
+
+        pub type ResponseBody = shared::ReferenceResponseBody;
+        pub type Object = shared::ReferenceResponseBodyObject;
     }
 
     /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
@@ -1016,6 +1043,26 @@ mod create_a_commit_tests {
         };
 
         assert_eq_deserialized(&actual, &expected);
+    }
+}
+
+#[cfg(test)]
+mod create_a_reference_tests {
+    use crate::github::rest_api::create_a_reference::RequestBody;
+    use crate::github::test_util::assert_eq_deserialized;
+
+    #[test]
+    fn deserialization_with_github_example_payload() {
+        // From the docs: https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference
+        let expected = r#"{"ref":"refs/heads/featureA","sha":"aa218f56b14c9653891f9e74264a383fa43fefbd"}"#;
+
+        let actual = {
+            let actual_serialized = serde_json::from_str::<RequestBody>(&expected).unwrap();
+
+            serde_json::to_string(&actual_serialized).unwrap()
+        };
+
+        assert_eq_deserialized(&actual, expected);
     }
 }
 
