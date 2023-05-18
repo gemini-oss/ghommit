@@ -1,185 +1,51 @@
 #![allow(clippy::redundant_field_names)]
 
-use std::collections::HashSet;
-use std::io::Write;
-
-use base64::write::EncoderStringWriter;
-use once_cell::sync::Lazy;
-
 use ghommit::config::Config;
-use ghommit::git_status::{git_status, PathStatus};
+use ghommit::create_a_tree_prep;
+use ghommit::git_status::git_status;
 use ghommit::github::GitHubClient;
-use ghommit::github::request::{CreateCommitOnBranchInput, CommittableBranch, CommitMessage, FileAddition, FileChanges, FileDeletion};
+use ghommit::github::rest_api::{create_a_commit, create_a_reference, get_a_reference, update_a_reference};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-enum GitCommitAction {
-    AddPath,
-    DeleteOriginalPath,
-    DeletePath,
-    Nop,
-    Unsupported,
-}
-
-fn delta_to_actions(git2_delta: git2::Delta) -> &'static HashSet<GitCommitAction> {
-    static ADD_PATH: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
-        GitCommitAction::AddPath,
-    ]));
-    static ADD_PATH_AND_DELETE_ORIGINAL_PATH: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
-        GitCommitAction::AddPath,
-        GitCommitAction::DeleteOriginalPath,
-    ]));
-    static DELETE_PATH: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
-        GitCommitAction::DeletePath,
-    ]));
-    static NOP: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
-        GitCommitAction::Nop,
-    ]));
-    static UNSUPPORTED: Lazy<HashSet<GitCommitAction>> = Lazy::new(|| HashSet::from([
-        GitCommitAction::Unsupported,
-    ]));
-
-    match git2_delta {
-        // Add path
-        git2::Delta::Modified => &ADD_PATH,
-        git2::Delta::Added => &ADD_PATH,
-        git2::Delta::Copied => &ADD_PATH,
-        git2::Delta::Typechange => &ADD_PATH,
-        // Add path and delete original path
-        git2::Delta::Renamed => &ADD_PATH_AND_DELETE_ORIGINAL_PATH,
-        // Delete path
-        git2::Delta::Deleted => &DELETE_PATH,
-        // // NOPs
-        git2::Delta::Unmodified => &NOP,
-        git2::Delta::Ignored => &NOP,
-        git2::Delta::Untracked => &NOP,
-        // Unsupported
-        git2::Delta::Unreadable => &UNSUPPORTED,
-        git2::Delta::Conflicted => &UNSUPPORTED,
+fn generate_create_a_commit_body(config: &Config, tree_sha: &str) -> create_a_commit::RequestBody {
+    create_a_commit::RequestBody {
+        message: config.commit_message.to_string(),
+        parents: vec![config.git_head_object_id.to_string()],
+        tree: tree_sha.to_string(),
     }
 }
 
-fn read_as_base64(repo: &git2::Repository, object_id: git2::Oid) -> Result<String, String> {
-    let object = repo.find_object(object_id, None)
-        .map_err(|_| format!("Unable to find object {:?} in repo {:?}", object_id, repo.path()))?;
+fn branch_exists(github_client: &GitHubClient, config: &Config) -> Result<bool, String> {
+    let get_a_reference_response = github_client.get_a_reference(config);
 
-    if let Some(blob) = object.as_blob() {
-        let bytes = blob.content();
-
-        let mut enc = EncoderStringWriter::new(&base64::engine::general_purpose::STANDARD);
-
-        match enc.write_all(bytes) {
-            Ok(_) => Ok(enc.into_inner()),
-            Err(_) => Err(format!("Failed to Base64-encode contents of object {:?} in repo {:?}", object_id, repo.path())),
-        }
-    } else {
-        Err(format!("Expected object {:?} in repo {:?} to be a blob, but found {:?}", object_id, repo.path(), object.kind()))
-    }
-}
-
-fn path_statuses_to_file_changes(repo: &git2::Repository, status: &Vec<PathStatus>) -> Result<FileChanges, String> {
-    fn checks(additions: &Vec<FileAddition>, deletions: &Vec<FileDeletion>) -> Result<(), String> {
-        // Emptiness
-        if additions.is_empty() && deletions.is_empty() {
-            Err("No changes to commit".to_owned())?
-        }
-
-        // Duplicates
-        let additions_set: HashSet<_> = additions.iter().map(|a| &a.path).collect();
-        let deletions_set: HashSet<_> = deletions.iter().map(|d| &d.path).collect();
-
-        if additions_set.len() != additions.len() {
-            Err(format!("Files were added more than once: {:?}", additions))?
-        }
-
-        if deletions_set.len() != deletions.len() {
-            Err(format!("Files were deleted more than once: {:?}", deletions))?
-        }
-
-        // Files both added and deleted
-        let intersection: HashSet<_> = additions_set.intersection(&deletions_set).collect();
-
-        if !intersection.is_empty() {
-            Err(format!("Some files were added and deleted: {:?}", intersection))?
-        }
-
-        Ok(())
-    }
-
-    let mut additions = vec![];
-    let mut deletions = vec![];
-
-    for path_status in status {
-        let actions = delta_to_actions(path_status.delta);
-
-        for action in actions {
-            match action {
-                GitCommitAction::AddPath => {
-                    let path = path_status.path.clone();
-
-                    let file_addition = FileAddition {
-                        contents: read_as_base64(repo, path_status.object_id)?,
-                        path: path,
-                    };
-
-                    additions.push(file_addition)
-                }
-                GitCommitAction::DeleteOriginalPath => {
-                    let path = match &path_status.original_path {
-                        Some(path) => path.clone(),
-                        None => Err(format!("Expected an original path, but none was found for {:?}", path_status))?,
-                    };
-
-                    let file_deletion = FileDeletion {
-                        path: path,
-                    };
-
-                    deletions.push(file_deletion);
-                },
-                GitCommitAction::DeletePath => {
-                    let file_deletion = FileDeletion {
-                        path: path_status.path.clone(),
-                    };
-
-                    deletions.push(file_deletion);
-                },
-                GitCommitAction::Nop => {},
-                GitCommitAction::Unsupported => {
-                    Err(format!("Unsupported delta {:?} for path status {:?}", path_status.delta, path_status))?
-                },
+    let exists = match get_a_reference_response {
+        Ok(get_a_reference_response) => {
+            match get_a_reference_response {
+                get_a_reference::ResponseBody::Ok(_) => true,
+                get_a_reference::ResponseBody::NotFound(_) => false,
             }
-        }
-    }
-
-    checks(&additions, &deletions)?;
-
-    Ok(FileChanges {
-        additions: additions,
-        deletions: deletions,
-    })
-}
-
-/// Returns a URL to the commit on GitHub.
-fn commit_via_github_api(github_client: &GitHubClient, config: &Config, file_changes: FileChanges) -> Result<String, String> {
-    let repo_owner = &config.github_repo_owner;
-    let repo_name = &config.github_repo_name;
-
-    let repo_owner_and_name = format!("{}/{}", repo_owner, repo_name);
-
-    let args = CreateCommitOnBranchInput {
-        branch: CommittableBranch {
-            repository_name_with_owner: repo_owner_and_name,
-            branch_name: config.git_branch_name.clone(),
         },
-        client_mutation_id: None,
-        expected_head_oid: config.git_head_object_id.clone(),
-        file_changes: Some(file_changes),
-        message: CommitMessage {
-            headline: config.commit_message.clone(),
-            body: None,
-        }
+        Err(err_string) => Err(err_string)?,
     };
 
-    github_client.create_commit_on_branch(config, args)
+    Ok(exists)
+}
+
+fn update_a_reference(config: &Config, github_client: &GitHubClient, commit_sha: &str) -> Result<update_a_reference::ResponseBody, String> {
+    let payload = update_a_reference::RequestBody {
+        sha: commit_sha.to_string(),
+        force: config.git_should_force_push,
+    };
+
+    github_client.update_a_reference(&config, &payload)
+}
+
+fn create_a_reference(config: &Config, github_client: &GitHubClient, commit_sha: &str) -> Result<create_a_reference::ResponseBody, String> {
+    let payload = create_a_reference::RequestBody {
+        reference: format!("refs/heads/{}", config.git_branch_name),
+        sha: commit_sha.to_string(),
+    };
+
+    github_client.create_a_reference(&config, &payload)
 }
 
 fn ghommit() -> Result<String, String> {
@@ -188,7 +54,9 @@ fn ghommit() -> Result<String, String> {
 
     let status = git_status(&config.git_repo)?;
 
-    let file_changes = path_statuses_to_file_changes(&config.git_repo, &status)?;
+    if status.is_empty() {
+        return Err("No changes to commit".to_string())
+    }
 
     let github_client = GitHubClient::new(
         config.github_app_id,
@@ -196,9 +64,24 @@ fn ghommit() -> Result<String, String> {
         config.github_app_private_key.clone(),
     );
 
-    let commit_url = commit_via_github_api(&github_client, &config, file_changes)?;
+    // - Create the tree, creating the blobs if necessary implicitly
 
-    Ok(commit_url)
+    let tree_payload = create_a_tree_prep::generate_request_body(&config, &config.git_repo, &status, &github_client)?;
+    let tree = github_client.create_a_tree(&config, &tree_payload)?;
+
+    // - Create the commit
+
+    let commit_payload = generate_create_a_commit_body(&config, &tree.sha);
+    let commit = github_client.create_a_commit(&config, &commit_payload)?;
+
+    // - If branch exists, update it, else create it
+
+    match branch_exists(&github_client, &config)? {
+        true => update_a_reference(&config, &github_client, &commit.sha),
+        false => create_a_reference(&config, &github_client, &commit.sha),
+    }?;
+
+    Ok(commit.html_url)
 }
 
 fn main() -> Result<(), String> {
