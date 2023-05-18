@@ -14,9 +14,6 @@ use crate::github::rest_api::create_an_installation_access_token;
 
 use self::rest_api::{create_a_blob, create_a_commit, create_a_reference, create_a_tree, get_a_reference, update_a_reference};
 
-const GRAPHQL_URL: &str = "https://api.github.com/graphql";
-const REST_API_BASE_URL: &str = "https://api.github.com";
-
 struct AccessToken {
     token: Arc<String>,
     expires_at: DateTime<Utc>,
@@ -31,6 +28,7 @@ impl AccessToken {
 }
 
 pub struct GitHubClient {
+    github_api_base_url: String,
     github_app_id: u64,
     github_app_installation_id: u64,
     github_app_private_key: EncodingKey,
@@ -54,11 +52,6 @@ mod custom_header {
     });
 }
 
-enum GitHubApiType {
-    GraphQL,
-    Rest,
-}
-
 enum AuthorizationTokenType {
     AccessToken,
     Jwt,
@@ -67,6 +60,7 @@ enum AuthorizationTokenType {
 impl GitHubClient {
     pub fn new(github_app_id: u64, github_app_installation_id: u64, github_app_private_key: EncodingKey) -> GitHubClient {
         GitHubClient {
+            github_api_base_url: "https://api.github.com".to_owned(),
             github_app_id: github_app_id,
             github_app_installation_id: github_app_installation_id,
             github_app_private_key: github_app_private_key,
@@ -94,7 +88,7 @@ impl GitHubClient {
         }
     }
 
-    /// https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app
+    /// [Generating a JSON Web Token (JWT) for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app)
     fn get_jwt(&self) -> Result<String, String> {
         let now = Self::unix_epoch_second_now()?;
         let ten_minutes_from_now = now + (10 * 60);
@@ -140,7 +134,7 @@ impl GitHubClient {
                         expires_at: raw_access_token.expires_at,
                     };
 
-                    let return_token = access_token.token.clone();
+                    let return_token = Arc::clone(&access_token.token);
 
                     *access_token_guard = Some(access_token);
 
@@ -162,7 +156,7 @@ impl GitHubClient {
     /// - `Authorization`
     /// - `User-Agent`
     /// - `X-GitHub-Api-Version` (if using the REST API)
-    fn base_headers(&self, api_type: GitHubApiType, auth_token_type: AuthorizationTokenType) -> Result<HeaderMap, String> {
+    fn base_headers(&self, auth_token_type: AuthorizationTokenType) -> Result<HeaderMap, String> {
         let token = match auth_token_type {
             AuthorizationTokenType::AccessToken => self.get_access_token(false)?,
             // - Creating an `Arc` is generally cheaper than cloning a `String`,
@@ -175,16 +169,11 @@ impl GitHubClient {
             Err(_) => Err("Unable to create header value with JWT string")?,
         };
 
-        let accept_header_value = match api_type {
-            GitHubApiType::GraphQL => HeaderValue::from_static("application/json"),
-            GitHubApiType::Rest => HeaderValue::from_static("application/vnd.github+json"),
-        };
-
         let mut headers = HeaderMap::new();
 
         headers.insert(
             header::ACCEPT,
-            accept_header_value,
+            HeaderValue::from_static("application/vnd.github+json"),
         );
         headers.insert(
             header::AUTHORIZATION,
@@ -196,22 +185,16 @@ impl GitHubClient {
             header::USER_AGENT,
             HeaderValue::from_static("ghommit")
         );
-
-        match api_type {
-            GitHubApiType::GraphQL => {}
-            GitHubApiType::Rest => {
-                headers.insert(
-                    &*custom_header::X_GITHUB_API_VERSION,
-                    HeaderValue::from_static("2022-11-28"),
-                );
-            }
-        }
+        headers.insert(
+            &*custom_header::X_GITHUB_API_VERSION,
+            HeaderValue::from_static("2022-11-28"),
+        );
 
         Ok(headers)
     }
 
     fn make_api_request<T: Serialize + ?Sized>(&self, http_method: reqwest::Method, path: &str, json: Option<&T>, auth_token_type: Option<AuthorizationTokenType>) -> Result<Response, String> {
-        let url = format!("{}{}", REST_API_BASE_URL, path);
+        let url = format!("{}{}", self.github_api_base_url, path);
 
         let auth_token_type = match auth_token_type {
             Some(auth_token_type) => auth_token_type,
@@ -219,7 +202,7 @@ impl GitHubClient {
         };
 
         let http_client = self.get_http_client(None)?;
-        let headers = self.base_headers(GitHubApiType::Rest, auth_token_type)?;
+        let headers = self.base_headers(auth_token_type)?;
         let request = http_client.request(http_method, url).headers(headers);
 
         let request = match json {
@@ -282,112 +265,6 @@ impl GitHubClient {
         Ok(data)
     }
 
-    fn make_graphql_request<T: Serialize + ?Sized, R: DeserializeOwned>(&self, json: &T) -> Result<R, String> {
-        let http_client = self.get_http_client(None)?;
-        let headers = self.base_headers(GitHubApiType::GraphQL, AuthorizationTokenType::AccessToken)?;
-        let request = http_client.post(GRAPHQL_URL).headers(headers).json(&json);
-
-        let response = match request.send() {
-            Ok(response) => response,
-            Err(e) => Err(format!("Request failed: {}", e))?,
-        };
-
-        // - Read as text before deserializing to a struct since `.text()` and
-        //   `.json()` are move operations, and `.text()` is more likely to
-        //   succeed
-        let text = match response.text() {
-            Ok(text) => text,
-            Err(e) => Err(format!("Error occurred while reading GraphQL response body as text: {}", e))?,
-        };
-
-        let data = match serde_json::from_str::<R>(&text) {
-            Ok(typed_result) => typed_result,
-            Err(e) => {
-                let err_str = e.to_string();
-                let type_str = std::any::type_name::<R>();
-                Err(format!("Error occurred while deserializing GraphQL response to {}: {}: {}", type_str, err_str, text))?
-            }
-        };
-
-        Ok(data)
-    }
-
-    fn does_branch_exist(&self, config: &Config) -> Result<bool, String> {
-        let query = r#"
-            query ($owner: String!, $repoName: String!, $branchName: String!) {
-                repository(owner: $owner, name: $repoName) {
-                    ref(qualifiedName: $branchName) {
-                        name
-                    }
-                }
-            }
-        "#;
-
-        let payload = request::DoesBranchExist {
-            query: query,
-            variables: request::DoesBranchExistVariables {
-                owner: &config.github_repo_owner,
-                repo_name: &config.github_repo_name,
-                branch_name: &config.git_branch_name,
-            },
-        };
-
-        let response: response::DoesBranchExist = self.make_graphql_request(&payload)?;
-        let branch_exists = response.data.repository.reference.is_some();
-
-        Ok(branch_exists)
-    }
-
-    /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
-    fn create_a_reference_original(&self, config: &Config) -> Result<(), String> {
-        let path = format!("/repos/{}/{}/git/refs", config.github_repo_owner, config.github_repo_name);
-
-        let payload = request::CreateBranch {
-            reference: &format!("refs/heads/{}", config.git_branch_name),
-            sha: &config.git_head_object_id,
-        };
-
-        let response = self.post_api_request(&path, Some(&payload), None)?;
-
-        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a branch")
-    }
-
-    fn ensure_branch_exists(&self, config: &Config) -> Result<(), String> {
-        if self.does_branch_exist(config)? {
-            Ok(())
-        } else {
-            self.create_a_reference_original(config)
-        }
-    }
-
-    /// Creates a commit on a branch. Returns the URL of the commit.
-    pub fn create_commit_on_branch(&self, config: &Config, args: request::CreateCommitOnBranchInput) -> Result<String, String> {
-        // - `createCommitOnBranch` fails if the branch doesn't exist, so ensure
-        //   that it exists first
-        self.ensure_branch_exists(config)?;
-
-        let mutation = r#"
-            mutation ($input: CreateCommitOnBranchInput!) {
-                createCommitOnBranch(input: $input) {
-                    commit {
-                        url
-                    }
-                }
-            }
-        "#;
-
-        let payload = request::CreateCommitOnBranch {
-            query: mutation.to_owned(),
-            variables: request::CreateCommitOnBranchVariables {
-                input: args,
-            },
-        };
-
-        let response_data: response::CreateCommitOnBranch = self.make_graphql_request(&payload)?;
-
-        Ok(response_data.data.create_commit_on_branch.commit.url)
-    }
-
     /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
     pub fn create_a_blob(&self, config: &Config, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
         let path = format!("/repos/{}/{}/git/blobs", config.github_repo_owner, config.github_repo_name);
@@ -410,8 +287,6 @@ impl GitHubClient {
     }
 
     /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
-    ///
-    /// - Note: This assumes that the ref is a head
     pub fn create_a_reference(&self, config: &Config, payload: &create_a_reference::RequestBody) -> Result<create_a_reference::ResponseBody, String> {
         let path = format!("/repos/{}/{}/git/refs", config.github_repo_owner, config.github_repo_name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
@@ -687,160 +562,6 @@ pub mod rest_api {
     }
 }
 
-pub mod request {
-    use serde::Serialize;
-
-    // > CreateBranch
-
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateBranch<'a> {
-        #[serde(rename = "ref")]
-        pub reference: &'a str,
-        pub sha: &'a str,
-    }
-
-    // > CreateCommitOnBranch
-
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranch {
-        pub query: String,
-        pub variables: CreateCommitOnBranchVariables,
-    }
-
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranchVariables {
-        pub input: CreateCommitOnBranchInput,
-    }
-
-    /// https://docs.github.com/en/graphql/reference/input-objects#createcommitonbranchinput
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranchInput {
-        pub branch: CommittableBranch,
-        pub client_mutation_id: Option<String>,
-        pub expected_head_oid: String,
-        pub file_changes: Option<FileChanges>,
-        pub message: CommitMessage,
-    }
-
-    /// https://docs.github.com/en/graphql/reference/input-objects#commitmessage
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CommitMessage {
-        pub body: Option<String>,
-        pub headline: String,
-    }
-
-    /// There is a second representation for this, but this implementation ignores
-    /// it.
-    ///
-    /// https://docs.github.com/en/graphql/reference/input-objects#committablebranch
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CommittableBranch {
-        pub repository_name_with_owner: String,
-        pub branch_name: String,
-    }
-
-    /// https://docs.github.com/en/graphql/reference/input-objects#filechanges
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct FileChanges {
-        pub additions: Vec<FileAddition>,
-        pub deletions: Vec<FileDeletion>,
-    }
-
-    /// https://docs.github.com/en/graphql/reference/input-objects#fileaddition
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct FileAddition {
-        pub path: String,
-        pub contents: String,
-    }
-
-    /// https://docs.github.com/en/graphql/reference/input-objects#filedeletion
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct FileDeletion {
-        pub path: String,
-    }
-
-    // > DoesBranchExist
-
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DoesBranchExist<'a> {
-        pub query: &'a str,
-        pub variables: DoesBranchExistVariables<'a>,
-    }
-
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DoesBranchExistVariables<'a> {
-        pub owner: &'a str,
-        pub repo_name: &'a str,
-        pub branch_name: &'a str,
-    }
-}
-
-pub mod response {
-    use serde::Deserialize;
-
-    // > CreateCommitOnBranch
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranch {
-        pub data: CreateCommitOnBranchData,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranchData {
-        pub create_commit_on_branch: CreateCommitOnBranchCreateCommitOnBranch,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranchCreateCommitOnBranch {
-        pub commit: CreateCommitOnBranchCommit,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateCommitOnBranchCommit {
-        pub url: String,
-    }
-
-    // > DoesBranchExist
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DoesBranchExist {
-        pub data: DoesBranchExistData,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DoesBranchExistData {
-        pub repository: DoesBranchExistRepository,
-    }
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DoesBranchExistRepository {
-        #[serde(rename = "ref")]
-        pub reference: Option<DoesBranchExistName>,
-    }
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DoesBranchExistName {
-        pub name: String,
-    }
-}
-
 #[cfg(test)]
 mod test_util {
     use serde_json::Value;
@@ -859,7 +580,6 @@ mod test_util {
     }
 
 }
-
 
 #[cfg(test)]
 mod access_token_tests {
