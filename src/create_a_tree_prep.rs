@@ -148,16 +148,16 @@ pub fn generate_request_body(config: &Config, repo: &git2::Repository, git_statu
     for path_status in git_status {
         let actions = delta_to_actions(path_status.delta);
 
-        let git_object_id = path_status.object_id;
-        let git_object = repo.find_object(git_object_id, None)
-            .map_err(|_| format!("Unable to find object {:?} in repo {:?}", git_object_id, repo.path()))?;
-
         for action in actions {
             let path = path_status.path.clone();
-            let node_type = git2_node_type_to_github_node_type(path_status, &git_object)?;
 
             match action {
                 GitCommitAction::AddPath => {
+                    let git_object_id = path_status.object_id;
+                    let git_object = repo.find_object(git_object_id, None)
+                        .map_err(|_| format!("Unable to find object {:?} in repo {:?}", git_object_id, repo.path()))?;
+
+                    let node_type = git2_node_type_to_github_node_type(path_status, &git_object)?;
                     let file_mode = git2_mode_to_github_mode(path_status)?;
                     let object_contents = read_file(path_status, &git_object)?;
 
