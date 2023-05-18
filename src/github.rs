@@ -9,7 +9,6 @@ use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::config::Config;
 use crate::github::rest_api::create_an_installation_access_token;
 
 use self::rest_api::{create_a_blob, create_a_commit, create_a_reference, create_a_tree, get_a_reference, update_a_reference};
@@ -27,12 +26,18 @@ impl AccessToken {
     }
 }
 
+pub struct GitHubRepo {
+    pub owner: String,
+    pub name: String,
+}
+
 pub struct GitHubClient {
     github_api_base_url: String,
     github_app_id: u64,
     github_app_installation_id: u64,
     github_app_private_key: EncodingKey,
     github_access_token: Mutex<Option<AccessToken>>,
+    github_repo: GitHubRepo,
 }
 
 #[derive(Debug, Serialize)]
@@ -58,13 +63,14 @@ enum AuthorizationTokenType {
 }
 
 impl GitHubClient {
-    pub fn new(github_app_id: u64, github_app_installation_id: u64, github_app_private_key: EncodingKey) -> GitHubClient {
+    pub fn new(github_app_id: u64, github_app_installation_id: u64, github_app_private_key: EncodingKey, github_repo: GitHubRepo) -> GitHubClient {
         GitHubClient {
             github_api_base_url: "https://api.github.com".to_owned(),
             github_app_id: github_app_id,
             github_app_installation_id: github_app_installation_id,
             github_app_private_key: github_app_private_key,
             github_access_token: Mutex::new(None),
+            github_repo: github_repo,
         }
     }
 
@@ -266,38 +272,36 @@ impl GitHubClient {
     }
 
     /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
-    pub fn create_a_blob(&self, config: &Config, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
-        let path = format!("/repos/{}/{}/git/blobs", config.github_repo_owner, config.github_repo_name);
+    pub fn create_a_blob(&self, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/blobs", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")
     }
 
     /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
-    pub fn create_a_tree(&self, config: &Config, payload: &create_a_tree::RequestBody) -> Result<create_a_tree::ResponseBody, String> {
-        let path = format!("/repos/{}/{}/git/trees", config.github_repo_owner, config.github_repo_name);
+    pub fn create_a_tree(&self, payload: &create_a_tree::RequestBody) -> Result<create_a_tree::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/trees", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a tree")
     }
 
     /// [Create a commit](https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit)
-    pub fn create_a_commit(&self, config: &Config, payload: &create_a_commit::RequestBody) -> Result<create_a_commit::ResponseBody, String> {
-        let path = format!("/repos/{}/{}/git/commits", config.github_repo_owner, config.github_repo_name);
+    pub fn create_a_commit(&self, payload: &create_a_commit::RequestBody) -> Result<create_a_commit::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/commits", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")
     }
 
     /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
-    pub fn create_a_reference(&self, config: &Config, payload: &create_a_reference::RequestBody) -> Result<create_a_reference::ResponseBody, String> {
-        let path = format!("/repos/{}/{}/git/refs", config.github_repo_owner, config.github_repo_name);
+    pub fn create_a_reference(&self, payload: &create_a_reference::RequestBody) -> Result<create_a_reference::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/refs", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::CREATED, "create a reference")
     }
 
     /// [Get a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
-    ///
-    /// - Note: This assumes that the ref is a head
-    pub fn get_a_reference(&self, config: &Config) -> Result<get_a_reference::ResponseBody, String> {
-        let path = format!("/repos/{}/{}/git/refs/heads/{}", config.github_repo_owner, config.github_repo_name, config.git_branch_name);
+    pub fn get_a_reference(&self, partially_qualified_reference_name: &str) -> Result<get_a_reference::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/refs/{}", self.github_repo.owner, self.github_repo.name, partially_qualified_reference_name);
         let response = self.get_api_request(&path, None)?;
 
         let operation = "get a reference";
@@ -318,10 +322,8 @@ impl GitHubClient {
     }
 
     /// [Update a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference)
-    ///
-    /// - Note: This assumes that the ref is a head
-    pub fn update_a_reference(&self, config: &Config, payload: &update_a_reference::RequestBody) -> Result<update_a_reference::ResponseBody, String> {
-        let path = format!("/repos/{}/{}/git/refs/heads/{}", config.github_repo_owner, config.github_repo_name, config.git_branch_name);
+    pub fn update_a_reference(&self, partially_qualified_reference_name: &str, payload: &update_a_reference::RequestBody) -> Result<update_a_reference::ResponseBody, String> {
+        let path = format!("/repos/{}/{}/git/refs/{}", self.github_repo.owner, self.github_repo.name, partially_qualified_reference_name);
         let response = self.patch_api_request(&path, Some(&payload), None)?;
         self.deserialize_expected_response(response, &StatusCode::OK, "update a reference")
     }

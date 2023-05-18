@@ -169,7 +169,7 @@ pub fn generate_request_body(config: &Config, repo: &git2::Repository, git_statu
                                 encoding: create_a_blob::Encoding::Base64,
                             };
 
-                            let response = github_client.create_a_blob(config, &request_body)?;
+                            let response = github_client.create_a_blob(&request_body)?;
                             create_a_tree::ShaOrContent::Sha(Some(response.sha))
                         },
                     };

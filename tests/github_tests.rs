@@ -2,7 +2,7 @@ use std::env;
 use std::sync::Arc;
 
 use ghommit::config::{CommandLineArguments, Config, EnvironmentVariableConfig, GitConfig};
-use ghommit::github::GitHubClient;
+use ghommit::github::{GitHubClient, GitHubRepo};
 use ghommit::github::rest_api::{create_a_blob, create_a_tree};
 
 struct EnvironmentVariableTestConfig {
@@ -34,11 +34,18 @@ impl EnvironmentVariableTestConfig {
 
 fn default_github_client() -> GitHubClient {
     let env_config = EnvironmentVariableConfig::gather().unwrap();
+    let test_config = EnvironmentVariableTestConfig::gather();
+
+    let github_repo = GitHubRepo {
+        owner: test_config.github_repo_owner,
+        name: test_config.github_repo_name,
+    };
 
     GitHubClient::new(
         env_config.github_app_id,
         env_config.github_app_installation_id,
         env_config.github_app_private_key,
+        github_repo,
     )
 }
 
@@ -91,7 +98,7 @@ fn create_a_blob_text() {
         encoding: create_a_blob::Encoding::Utf8,
     };
 
-    let response = github_client.create_a_blob(&config, &payload).unwrap();
+    let response = github_client.create_a_blob(&payload).unwrap();
 
     // printf 'hello' | git hash-object --stdin
     assert_eq!(response.sha, "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
@@ -113,7 +120,7 @@ fn create_a_blob_binary() {
         encoding: create_a_blob::Encoding::Base64,
     };
 
-    let response = github_client.create_a_blob(&config, &payload).unwrap();
+    let response = github_client.create_a_blob(&payload).unwrap();
 
     assert_eq!(response.sha, first_invalid_utf8_byte_git_hashed);
 }
@@ -134,7 +141,6 @@ fn create_a_reference() {
 #[ignore]
 fn create_a_tree() {
     let test_config = EnvironmentVariableTestConfig::gather();
-    let config = default_config();
     let github_client = default_github_client();
 
     let payload = create_a_tree::RequestBody {
@@ -150,7 +156,7 @@ fn create_a_tree() {
     };
 
     // - The request succeeding is good enough for now
-    github_client.create_a_tree(&config, &payload).unwrap();
+    github_client.create_a_tree(&payload).unwrap();
 }
 
 #[test]
