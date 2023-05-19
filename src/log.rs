@@ -3,11 +3,11 @@ use std::fmt::Debug;
 use colored::Colorize;
 
 pub fn print_intent<T: Debug>(title: &str, debuggable: &T) {
-    eprintln!("{}: {:?}", title, debuggable);
+    eprintln!("{}: {:?}", title.bold(), debuggable);
 }
 
 pub fn print_intent_plain(title: &str) {
-    eprintln!("{}", title);
+    eprintln!("{}", title.bold());
 }
 
 pub fn print_success_and_return<T: Debug>(title: &str, debuggable: T) -> T {
