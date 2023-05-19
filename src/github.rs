@@ -461,6 +461,8 @@ pub mod rest_api {
     /// The entirety of GitHub's trees API uses snake case, so serde
     /// renaming is only necessary for enum variants that derive `Serialize`
     pub mod create_a_tree {
+        use std::fmt;
+
         use serde::{Deserialize, Serialize, Serializer};
         use serde::ser::SerializeStruct;
 
@@ -494,10 +496,29 @@ pub mod rest_api {
 
         // - Since `TreeNode` needs to manually implement serialization for
         //   this type, there is no need for anything serde-related
-        #[derive(Debug)]
         pub enum ShaOrContent {
             Content(String),
             Sha(Option<String>),
+        }
+
+        // - Rather than printing out the full contents which may be large or
+        //   contain sensitive information if some were committed, accidentally
+        //   or otherwise, just print the size
+        impl fmt::Debug for ShaOrContent {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self {
+                    ShaOrContent::Content(s) => {
+                        f.debug_tuple("Content")
+                            .field(&format_args!("(content size: {})", s.len()))
+                            .finish()
+                    },
+                    ShaOrContent::Sha(option) => {
+                        f.debug_tuple("Sha")
+                            .field(option)
+                            .finish()
+                    },
+                }
+            }
         }
 
         #[derive(Debug)]
@@ -920,6 +941,16 @@ mod create_a_tree_tests {
 
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn sha_or_content_content_debug_representation() {
+        let content = "sensitive_information";
+        let sha_or_content = ShaOrContent::Content(content.to_string());
+        let debug_output = format!("{:?}", sha_or_content);
+
+        assert!(!debug_output.contains(content));
+        assert!(debug_output == format!("Content((content size: {}))", content.len()));
     }
 
     #[test]

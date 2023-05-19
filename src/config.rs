@@ -85,7 +85,7 @@ impl GitConfig {
                                     //   - (.+)
                                     //   - (.+)
                                     let owner = captures[1].to_string();
-                                    let name = captures[2].trim_end_matches("/").trim_end_matches(".git").to_string();
+                                    let name = captures[2].trim_end_matches('/').trim_end_matches(".git").to_string();
 
                                     GitHubRepo {
                                         owner: owner,
