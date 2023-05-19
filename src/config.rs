@@ -43,8 +43,29 @@ impl CommandLineArguments {
 }
 
 static GITHUB_URL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^git@github\.com:(.+)/(.+)$").unwrap()
+    Regex::new(r"^(?:git@github\.com:|https://github\.com/)(.+)/(.+)$").unwrap()
 });
+
+fn parse_github_push_url(push_url: &str) -> Result<GitHubRepo, String> {
+    match GITHUB_URL_REGEX.captures(push_url) {
+        Some(captures) => {
+            // - If there are captures, and there are,
+            //   three (and only three) are guaranteed
+            //   to exist:
+            //   - <the whole string>
+            //   - (.+)
+            //   - (.+)
+            let owner = captures[1].to_string();
+            let name = captures[2].trim_end_matches('/').trim_end_matches(".git").to_string();
+
+            Ok(GitHubRepo {
+                owner: owner,
+                name: name,
+            })
+        },
+        None => Err(format!("Expected remote URL to match {:?}: {:?}", GITHUB_URL_REGEX, push_url))?,
+    }
+}
 
 pub struct GitConfig {
     pub branch_name: String,
@@ -72,28 +93,11 @@ impl GitConfig {
                         let github_repo = {
                             let remote = repo.find_remote("origin")
                                 .map_err(|_| format!("No remote associated with branch {:?}", branch_name))?;
-                            let push_url_str = remote.pushurl()
+                            let push_url = remote.pushurl()
                                 .or_else(|| remote.url())
                                 .ok_or_else(|| format!("No push URL for remote asociated with branch {:?}", branch_name))?;
 
-                            match GITHUB_URL_REGEX.captures(push_url_str) {
-                                Some(captures) => {
-                                    // - If there are captures, and there are,
-                                    //   three (and only three) are guaranteed
-                                    //   to exist:
-                                    //   - <the whole string>
-                                    //   - (.+)
-                                    //   - (.+)
-                                    let owner = captures[1].to_string();
-                                    let name = captures[2].trim_end_matches('/').trim_end_matches(".git").to_string();
-
-                                    GitHubRepo {
-                                        owner: owner,
-                                        name: name,
-                                    }
-                                },
-                                None => Err(format!("Expected remote URL to match git@github.com/repo_owner/repo_name: {:?}", push_url_str))?,
-                            }
+                            parse_github_push_url(push_url)?
                         };
 
                         (branch_name, head_object_id, github_repo)
@@ -210,5 +214,32 @@ impl fmt::Display for Config {
         write!(f, ", github_repo_name: \"{}\"", self.github_repo_name)?;
         write!(f, " }}")?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use crate::config::parse_github_push_url;
+
+    #[test]
+    fn parse_github_git_url() {
+        let url = "git@github.com:gemini/ghommit.git";
+
+        let github_repo = parse_github_push_url(url)
+            .expect(&format!("Unable to parse {:?}", url));
+
+        assert_eq!(github_repo.owner, "gemini");
+        assert_eq!(github_repo.name, "ghommit");
+    }
+
+    #[test]
+    fn parse_github_https_url() {
+        let url = "https://github.com/gemini/ghommit";
+
+        let github_repo = parse_github_push_url(url)
+            .expect(&format!("Unable to parse {:?}", url));
+
+        assert_eq!(github_repo.owner, "gemini");
+        assert_eq!(github_repo.name, "ghommit");
     }
 }
