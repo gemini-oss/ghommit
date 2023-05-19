@@ -22,7 +22,7 @@ export GHOMMIT_GITHUB_APP_PRIVATE_KEY_PEM_DATA='Fill this in'
 #      that the local git state will not be in sync since the commit is being
 #      done remotely
 
-ghommit --github-owner-and-repo 'gemini/example_repo' -m 'Adding to foo'
+ghommit -m 'Adding to foo'
 
 # 4. (optional) If more git-related actions needs to be performed, keep in mind
 #    that that git state is out of sync and may require syncing

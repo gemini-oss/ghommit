@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::env;
 use std::sync::Arc;
 
@@ -55,8 +57,6 @@ fn default_config() -> Config {
     let cli_args = CommandLineArguments {
         commit_message: "ghommit test message".to_string(),
         git_should_force_push: false,
-        github_repo_owner: test_config.github_repo_owner,
-        github_repo_name: test_config.github_repo_name,
     };
     let maybe_repo = git2::Repository::open(&test_config.repo_path);
     let git_config = GitConfig::gather(maybe_repo).unwrap();
@@ -90,7 +90,6 @@ fn access_token_forcing() {
 #[test]
 #[ignore]
 fn create_a_blob_text() {
-    let config = default_config();
     let github_client = default_github_client();
 
     let payload = create_a_blob::RequestBody {
@@ -107,7 +106,6 @@ fn create_a_blob_text() {
 #[test]
 #[ignore]
 fn create_a_blob_binary() {
-    let config = default_config();
     let github_client = default_github_client();
 
     // printf '\x80' | base64

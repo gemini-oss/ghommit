@@ -3,16 +3,16 @@ use std::{env, fmt};
 use clap::Parser;
 use git2::Repository;
 use jsonwebtoken::EncodingKey;
+use once_cell::sync::Lazy;
+use regex::Regex;
+
+use crate::github::GitHubRepo;
 
 /// ghommit: GitHub commit
 #[derive(Debug)]
 #[derive(clap::Parser)]
 #[command(name = "ghommit")]
 struct CommandLineArgumentsRaw {
-    /// GitHub owner and repo name in $OWNER/$REPO_NAME format
-    #[arg(long, required = true)]
-    github_owner_and_repo: String,
-
     /// Commit message
     #[arg(long, short, required = true)]
     message: String,
@@ -26,8 +26,6 @@ struct CommandLineArgumentsRaw {
 pub struct CommandLineArguments {
     pub commit_message: String,
     pub git_should_force_push: bool,
-    pub github_repo_owner: String,
-    pub github_repo_name: String,
 }
 
 impl CommandLineArguments {
@@ -37,27 +35,21 @@ impl CommandLineArguments {
             Err(e) => Err(e.to_string())?,
         };
 
-        let repo_and_owner_split: Vec<&str> = raw_args.github_owner_and_repo.split('/').collect();
-
-        match repo_and_owner_split.as_slice() {
-            [owner, repo_name] => {
-                Ok(CommandLineArguments {
-                    commit_message: raw_args.message,
-                    git_should_force_push: raw_args.force,
-                    github_repo_owner: owner.to_string(),
-                    github_repo_name: repo_name.to_string(),
-                })
-            }
-            _ => {
-                Err(format!("Expected --github-owner-and-repo in $REPO/$OWNER, but found {}", raw_args.github_owner_and_repo))
-            }
-        }
+        Ok(CommandLineArguments {
+            commit_message: raw_args.message,
+            git_should_force_push: raw_args.force,
+        })
     }
 }
+
+static GITHUB_URL_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^git@github\.com:(.+)/(.+)$").unwrap()
+});
 
 pub struct GitConfig {
     pub branch_name: String,
     pub git_head_object_id: String,
+    pub github_repo: GitHubRepo,
     pub repository: Repository,
 }
 
@@ -65,19 +57,46 @@ impl GitConfig {
     pub fn gather(maybe_repo: Result<Repository, git2::Error>) -> Result<GitConfig, String> {
         match maybe_repo {
             Ok(repo) => {
-                let (branch_name, head_object_id) = match repo.head() {
+                let (branch_name, head_object_id, github_repo) = match repo.head() {
                     Ok(head) => {
                         let branch_name = match head.shorthand() {
-                            Some(name) => Ok(name.to_owned()),
-                            None => Err("Git repository HEAD name is invalid".to_owned()),
-                        }?;
+                            Some(name) => name.to_owned(),
+                            None => Err("Git repository HEAD branch name doesn't exist or is invalid".to_owned())?,
+                        };
 
                         let head_object_id = match head.peel_to_commit() {
-                            Ok(commit) => Ok(commit.id().to_string()),
-                            Err(_) => Err(format!("Could not resolve commit for branch {}", branch_name)),
-                        }?;
+                            Ok(commit) => commit.id().to_string(),
+                            Err(_) => Err(format!("Could not resolve commit for branch {}", branch_name))?,
+                        };
 
-                        (branch_name, head_object_id)
+                        let github_repo = {
+                            let remote = repo.find_remote("origin")
+                                .map_err(|_| format!("No remote associated with branch {:?}", branch_name))?;
+                            let push_url_str = remote.pushurl()
+                                .or_else(|| remote.url())
+                                .ok_or_else(|| format!("No push URL for remote asociated with branch {:?}", branch_name))?;
+
+                            match GITHUB_URL_REGEX.captures(push_url_str) {
+                                Some(captures) => {
+                                    // - If there are captures, and there are,
+                                    //   three (and only three) are guaranteed
+                                    //   to exist:
+                                    //   - <the whole string>
+                                    //   - (.+)
+                                    //   - (.+)
+                                    let owner = captures[1].to_string();
+                                    let name = captures[2].trim_end_matches("/").trim_end_matches(".git").to_string();
+
+                                    GitHubRepo {
+                                        owner: owner,
+                                        name: name,
+                                    }
+                                },
+                                None => Err(format!("Expected remote URL to match git@github.com/repo_owner/repo_name: {:?}", push_url_str))?,
+                            }
+                        };
+
+                        (branch_name, head_object_id, github_repo)
                     },
                     Err(_) => Err("Git repository doesn't have a HEAD".to_owned())?,
                 };
@@ -85,6 +104,7 @@ impl GitConfig {
                 Ok(GitConfig {
                     branch_name: branch_name,
                     git_head_object_id: head_object_id,
+                    github_repo: github_repo,
                     repository: repo,
                 })
             },
@@ -158,8 +178,8 @@ impl Config {
             github_app_id: env_config.github_app_id,
             github_app_installation_id: env_config.github_app_installation_id,
             github_app_private_key: env_config.github_app_private_key,
-            github_repo_owner: cli_args.github_repo_owner,
-            github_repo_name: cli_args.github_repo_name,
+            github_repo_owner: git_config.github_repo.owner,
+            github_repo_name: git_config.github_repo.name,
         }
     }
 

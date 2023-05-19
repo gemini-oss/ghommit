@@ -112,7 +112,11 @@ fn main() -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
-            eprintln!("{}", e.red());
+            if e.starts_with("ghommit: GitHub commit") {
+                eprintln!("{}", e)
+            } else {
+                eprintln!("{}", e.red());
+            }
             std::process::exit(1)
         }
     }
