@@ -1,13 +1,13 @@
 use std::time::{SystemTime, Duration, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Utc};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use reqwest::StatusCode;
 use reqwest::blocking::Response;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use time::OffsetDateTime;
 
 use crate::github::rest_api::create_an_installation_access_token;
 use crate::log::{print_intent, print_intent_plain, print_success_and_return, print_success_plain};
@@ -16,12 +16,12 @@ use self::rest_api::{create_a_blob, create_a_commit, create_a_reference, create_
 
 struct AccessToken {
     token: Arc<String>,
-    expires_at: DateTime<Utc>,
+    expires_at: OffsetDateTime,
 }
 
 impl AccessToken {
     fn expires_soon(&self) -> bool {
-        let two_minutes_from_now = Utc::now() + chrono::Duration::minutes(2);
+        let two_minutes_from_now = OffsetDateTime::now_utc() + time::Duration::minutes(2);
 
         self.expires_at < two_minutes_from_now
     }
@@ -433,24 +433,25 @@ pub mod rest_api {
 
     /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
     pub mod create_an_installation_access_token {
-        use chrono::{DateTime, Utc};
         use serde::{Deserialize, Deserializer};
+        use time::OffsetDateTime;
+        use time::format_description::well_known::Rfc3339;
 
         /// Abbreviated representation of the response body
         #[derive(Debug, Deserialize)]
         pub struct ResponseBody {
             pub token: String,
             #[serde(deserialize_with = "deserialize_datetime")]
-            pub expires_at: DateTime<Utc>,
+            pub expires_at: OffsetDateTime,
         }
 
-        fn deserialize_datetime<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+        fn deserialize_datetime<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
         where
             D: Deserializer<'de>,
         {
             let s = String::deserialize(deserializer)?;
 
-            DateTime::parse_from_rfc3339(&s)
+            OffsetDateTime::parse(&s, &Rfc3339)
                 .map_err(serde::de::Error::custom)
                 .map(|dt| dt.into())
         }
@@ -642,7 +643,7 @@ mod test_util {
 mod access_token_tests {
     use std::sync::Arc;
 
-    use chrono::{Utc, Duration};
+    use time::{Duration, OffsetDateTime};
 
     use super::AccessToken;
 
@@ -650,7 +651,7 @@ mod access_token_tests {
     fn expires_soon() {
         let access_token = AccessToken {
             token: Arc::new("".to_string()),
-            expires_at: Utc::now(),
+            expires_at: OffsetDateTime::now_utc(),
         };
 
         assert!(access_token.expires_soon())
@@ -660,7 +661,7 @@ mod access_token_tests {
     fn does_not_expire_soon() {
         let access_token = AccessToken {
             token: Arc::new("".to_string()),
-            expires_at: Utc::now() + Duration::minutes(5),
+            expires_at: OffsetDateTime::now_utc() + Duration::minutes(5),
         };
 
         assert!(!access_token.expires_soon())
