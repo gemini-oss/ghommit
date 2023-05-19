@@ -1,5 +1,6 @@
 #![allow(clippy::redundant_field_names)]
 
+use colored::Colorize;
 use ghommit::config::Config;
 use ghommit::create_a_tree_prep;
 use ghommit::git_status::git_status;
@@ -39,16 +40,11 @@ fn partially_qualify_branch_name(unqualified_name: &str) -> String {
 fn branch_exists(github_client: &GitHubClient, config: &Config) -> Result<bool, String> {
     let reference_name = partially_qualify_branch_name(&config.git_branch_name);
 
-    let get_a_reference_response = github_client.get_a_reference(&reference_name);
+    let get_a_reference_response = github_client.get_a_reference(&reference_name)?;
 
     let exists = match get_a_reference_response {
-        Ok(get_a_reference_response) => {
-            match get_a_reference_response {
-                get_a_reference::ResponseBody::Ok(_) => true,
-                get_a_reference::ResponseBody::NotFound(_) => false,
-            }
-        },
-        Err(err_string) => Err(err_string)?,
+        get_a_reference::ResponseBody::Ok(_) => true,
+        get_a_reference::ResponseBody::NotFound(_) => false,
     };
 
     Ok(exists)
@@ -111,11 +107,12 @@ fn main() -> Result<(), String> {
     // the Err wrapping so newlines aren't escaped
     match ghommit() {
         Ok(commit_url) => {
-            println!("Commit created: {}", commit_url);
+            let output = format!(r#"{{"commit_url": "{}"}}"#, commit_url);
+            println!("{}", output);
             Ok(())
         }
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{}", e.red());
             std::process::exit(1)
         }
     }

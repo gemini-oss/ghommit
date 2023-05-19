@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::github::rest_api::create_an_installation_access_token;
+use crate::log::{print_intent, print_intent_plain, print_success_and_return, print_success_plain};
 
 use self::rest_api::{create_a_blob, create_a_commit, create_a_reference, create_a_tree, get_a_reference, update_a_reference};
 
@@ -117,14 +118,7 @@ impl GitHubClient {
         }
     }
 
-    /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
     pub fn get_access_token(&self, force_token_renewal: bool) -> Result<Arc<String>, String> {
-        fn acquire_access_token(this: &GitHubClient) -> Result<create_an_installation_access_token::ResponseBody, String> {
-            let path = format!("/app/installations/{}/access_tokens", this.github_app_installation_id);
-            let response = this.post_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
-            GitHubClient::deserialize_expected_response(this, response, &StatusCode::CREATED, "acquire an access token")
-        }
-
         match self.github_access_token.lock() {
             Ok(mut access_token_guard) => {
                 let should_update = force_token_renewal || match &*access_token_guard {
@@ -133,7 +127,7 @@ impl GitHubClient {
                 };
 
                 if should_update {
-                    let raw_access_token = acquire_access_token(self)?;
+                    let raw_access_token = self.create_an_installation_access_token()?;
 
                     let access_token = AccessToken {
                         token: Arc::new(raw_access_token.token),
@@ -244,7 +238,7 @@ impl GitHubClient {
         }
     }
 
-    fn deserialize_expected_response<R: DeserializeOwned>(&self, response: Response, expected_status_code: &StatusCode, operation: &str) -> Result<R, String> {
+    fn deserialize_expected_response<R: DeserializeOwned>(response: Response, expected_status_code: &StatusCode, operation: &str) -> Result<R, String> {
         let status_code = response.status();
 
         if &status_code != expected_status_code {
@@ -273,34 +267,64 @@ impl GitHubClient {
 
     /// [Create a blob](https://docs.github.com/en/rest/git/blobs?apiVersion=2022-11-28#create-a-blob)
     pub fn create_a_blob(&self, payload: &create_a_blob::RequestBody) -> Result<create_a_blob::ResponseBody, String> {
+        print_intent("Creating a blob", &payload);
+
         let path = format!("/repos/{}/{}/git/blobs", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a blob");
+
+        print_success_and_return("Blob created", ret)
     }
 
     /// [Create a tree](https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28#create-a-tree)
     pub fn create_a_tree(&self, payload: &create_a_tree::RequestBody) -> Result<create_a_tree::ResponseBody, String> {
+        print_intent("Creating a tree", &payload);
+
         let path = format!("/repos/{}/{}/git/trees", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a tree")
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a tree");
+
+        print_success_and_return("Tree created", ret)
     }
 
     /// [Create a commit](https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit)
     pub fn create_a_commit(&self, payload: &create_a_commit::RequestBody) -> Result<create_a_commit::ResponseBody, String> {
+        print_intent("Creating a commit", &payload);
+
         let path = format!("/repos/{}/{}/git/commits", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a commit");
+
+        print_success_and_return("Commit created", ret)
     }
 
     /// [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
     pub fn create_a_reference(&self, payload: &create_a_reference::RequestBody) -> Result<create_a_reference::ResponseBody, String> {
+        print_intent("Creating reference", &payload);
+
         let path = format!("/repos/{}/{}/git/refs", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        self.deserialize_expected_response(response, &StatusCode::CREATED, "create a reference")
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a reference");
+
+        print_success_and_return("Reference created", ret)
+    }
+
+    /// [Create an installation access token for an app](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#create-an-installation-access-token-for-an-app)
+    pub fn create_an_installation_access_token(&self) -> Result<create_an_installation_access_token::ResponseBody, String> {
+        print_intent_plain("Creating an installation access token");
+
+        let path = format!("/app/installations/{}/access_tokens", self.github_app_installation_id);
+        let response = self.post_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "acquire an access token");
+
+        print_success_plain("Created an installation access token");
+        ret
     }
 
     /// [Get a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
     pub fn get_a_reference(&self, partially_qualified_reference_name: &str) -> Result<get_a_reference::ResponseBody, String> {
+        print_intent("Getting a reference", &partially_qualified_reference_name);
+
         let path = format!("/repos/{}/{}/git/refs/{}", self.github_repo.owner, self.github_repo.name, partially_qualified_reference_name);
         let response = self.get_api_request(&path, None)?;
 
@@ -310,12 +334,16 @@ impl GitHubClient {
 
         match status_code {
             StatusCode::OK => {
-                let success_body = self.deserialize_expected_response(response, &status_code, operation)?;
-                Ok(get_a_reference::ResponseBody::Ok(success_body))
+                let success_body = Self::deserialize_expected_response(response, &status_code, operation)?;
+
+                let ret = Ok(get_a_reference::ResponseBody::Ok(success_body));
+                print_success_and_return("Reference retrieved", ret)
             },
             StatusCode::NOT_FOUND => {
-                let failure_body = self.deserialize_expected_response(response, &status_code, operation)?;
-                Ok(get_a_reference::ResponseBody::NotFound(failure_body))
+                let failure_body = Self::deserialize_expected_response(response, &status_code, operation)?;
+
+                let ret = Ok(get_a_reference::ResponseBody::NotFound(failure_body));
+                print_success_and_return("Reference retrieved", ret)
             }
             _ => Err(Self::unexpected_status_code_error_message(response, operation)),
         }
@@ -323,9 +351,14 @@ impl GitHubClient {
 
     /// [Update a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#update-a-reference)
     pub fn update_a_reference(&self, partially_qualified_reference_name: &str, payload: &update_a_reference::RequestBody) -> Result<update_a_reference::ResponseBody, String> {
+        print_intent(&format!("Updating reference {:?}", partially_qualified_reference_name), &payload);
+
         let path = format!("/repos/{}/{}/git/refs/{}", self.github_repo.owner, self.github_repo.name, partially_qualified_reference_name);
         let response = self.patch_api_request(&path, Some(&payload), None)?;
-        self.deserialize_expected_response(response, &StatusCode::OK, "update a reference")
+
+        let ret = Self::deserialize_expected_response(response, &StatusCode::OK, "update a reference");
+
+        print_success_and_return(&format!("Reference {:?} updated", partially_qualified_reference_name), ret)
     }
 }
 
@@ -520,6 +553,7 @@ pub mod rest_api {
         #[derive(Debug, Deserialize, Serialize)]
         pub struct ResponseBodyNotFound {}
 
+        #[derive(Debug)]
         pub enum ResponseBody {
             Ok(ResponseBodyOk),
             NotFound(ResponseBodyNotFound),
