@@ -30,18 +30,15 @@ ghommit -m 'Adding to foo'
 
 ## Building
 
-### Building for the current Mac on the current Mac
+```shell
+# One-time setup for cross-compilation
+cargo install cross
 
-```bash
-# Produces target/release/ghommit
+# Building for the current machine
 cargo build --release
-```
 
-### Building for Linux on a Mac
-
-```bash
-# - Until cross-compilation is sorted, do it in Docker
-docker run --rm -it -v "${PWD}:/host" --workdir '/host' rust:bullseye cargo build --release
+# Building for Linux (x86_64)
+cross build --release --target=x86_64-unknown-linux-musl
 ```
 
 ## Testing
