@@ -271,7 +271,7 @@ impl GitHubClient {
 
         let path = format!("/repos/{}/{}/git/blobs", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a blob");
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a blob")?;
 
         print_success_and_return("Blob created", ret)
     }
@@ -282,7 +282,7 @@ impl GitHubClient {
 
         let path = format!("/repos/{}/{}/git/trees", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a tree");
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a tree")?;
 
         print_success_and_return("Tree created", ret)
     }
@@ -293,7 +293,7 @@ impl GitHubClient {
 
         let path = format!("/repos/{}/{}/git/commits", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a commit");
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a commit")?;
 
         print_success_and_return("Commit created", ret)
     }
@@ -304,7 +304,7 @@ impl GitHubClient {
 
         let path = format!("/repos/{}/{}/git/refs", self.github_repo.owner, self.github_repo.name);
         let response = self.post_api_request(&path, Some(&payload), None)?;
-        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a reference");
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "create a reference")?;
 
         print_success_and_return("Reference created", ret)
     }
@@ -315,10 +315,10 @@ impl GitHubClient {
 
         let path = format!("/app/installations/{}/access_tokens", self.github_app_installation_id);
         let response = self.post_api_request::<()>(&path, None, Some(AuthorizationTokenType::Jwt))?;
-        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "acquire an access token");
+        let ret = Self::deserialize_expected_response(response, &StatusCode::CREATED, "acquire an access token")?;
 
         print_success_plain("Created an installation access token");
-        ret
+        Ok(ret)
     }
 
     /// [Get a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
@@ -336,15 +336,15 @@ impl GitHubClient {
             StatusCode::OK => {
                 let success_body = Self::deserialize_expected_response(response, &status_code, operation)?;
 
-                let ret = Ok(get_a_reference::ResponseBody::Ok(success_body));
+                let ret = get_a_reference::ResponseBody::Ok(success_body);
                 print_success_and_return("Reference retrieved", ret)
             },
             StatusCode::NOT_FOUND => {
                 let failure_body = Self::deserialize_expected_response(response, &status_code, operation)?;
 
-                let ret = Ok(get_a_reference::ResponseBody::NotFound(failure_body));
+                let ret = get_a_reference::ResponseBody::NotFound(failure_body);
                 print_success_and_return("Reference retrieved", ret)
-            }
+            },
             _ => Err(Self::unexpected_status_code_error_message(response, operation)),
         }
     }
@@ -355,8 +355,7 @@ impl GitHubClient {
 
         let path = format!("/repos/{}/{}/git/refs/{}", self.github_repo.owner, self.github_repo.name, partially_qualified_reference_name);
         let response = self.patch_api_request(&path, Some(&payload), None)?;
-
-        let ret = Self::deserialize_expected_response(response, &StatusCode::OK, "update a reference");
+        let ret = Self::deserialize_expected_response(response, &StatusCode::OK, "update a reference")?;
 
         print_success_and_return(&format!("Reference {:?} updated", partially_qualified_reference_name), ret)
     }

@@ -10,12 +10,12 @@ pub fn print_intent_plain(title: &str) {
     eprintln!("{}", title.bold());
 }
 
-pub fn print_success_and_return<T: Debug>(title: &str, debuggable: T) -> T {
+pub fn print_success_and_return<T: Debug, R>(title: &str, debuggable: T) -> Result<T, R> {
     let s = format!("{}: {:?}", title.bold(), debuggable);
 
     eprintln!("{}", s.green());
 
-    debuggable
+    Ok(debuggable)
 }
 
 pub fn print_success_plain(title: &str) {
