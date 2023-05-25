@@ -223,23 +223,23 @@ mod config_tests {
 
     #[test]
     fn parse_github_git_url() {
-        let url = "git@github.com:gemini/ghommit.git";
+        let url = "git@github.com:gemini-oss/ghommit.git";
 
         let github_repo = parse_github_push_url(url)
             .expect(&format!("Unable to parse {:?}", url));
 
-        assert_eq!(github_repo.owner, "gemini");
+        assert_eq!(github_repo.owner, "gemini-oss");
         assert_eq!(github_repo.name, "ghommit");
     }
 
     #[test]
     fn parse_github_https_url() {
-        let url = "https://github.com/gemini/ghommit";
+        let url = "https://github.com/gemini-oss/ghommit";
 
         let github_repo = parse_github_push_url(url)
             .expect(&format!("Unable to parse {:?}", url));
 
-        assert_eq!(github_repo.owner, "gemini");
+        assert_eq!(github_repo.owner, "gemini-oss");
         assert_eq!(github_repo.name, "ghommit");
     }
 }
