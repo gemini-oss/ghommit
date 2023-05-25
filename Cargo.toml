@@ -3,6 +3,9 @@ name = "ghommit"
 version = "0.0.5"
 edition = "2021"
 
+[profile.release]
+strip = "debuginfo"
+
 [dependencies]
 base64 = "0.21.0"
 clap = { version = "4.2.4", features = ["derive"] }
