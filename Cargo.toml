@@ -9,7 +9,7 @@ strip = "debuginfo"
 [dependencies]
 base64 = "0.21.0"
 clap = { version = "4.2.4", features = ["derive"] }
-colored = "2.0.0"
+colored = "2.0.4"
 git2 = "0.17.1"
 jsonwebtoken = "8.3.0"
 openssl = { version = "0.10.55", features = ["vendored"] }
