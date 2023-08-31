@@ -43,7 +43,11 @@ impl CommandLineArguments {
 }
 
 static GITHUB_URL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?:git@github\.com:|https://github\.com/)(.+)/(.+)$").unwrap()
+    // - A URL's user information subcomponent, which often follows the
+    //   `username:password@` format, only requires the at-sign to be present
+    //   - https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.1
+
+    Regex::new(r"^(?:git@github\.com:|https://(?:.*@)?github\.com/)(.+)/(.+)$").unwrap()
 });
 
 fn parse_github_push_url(push_url: &str) -> Result<GitHubRepo, String> {
@@ -235,6 +239,28 @@ mod config_tests {
     #[test]
     fn parse_github_https_url() {
         let url = "https://github.com/gemini-oss/ghommit";
+
+        let github_repo = parse_github_push_url(url)
+            .expect(&format!("Unable to parse {:?}", url));
+
+        assert_eq!(github_repo.owner, "gemini-oss");
+        assert_eq!(github_repo.name, "ghommit");
+    }
+
+    #[test]
+    fn parse_github_https_url_with_minimal_user_information() {
+        let url = "https://@github.com/gemini-oss/ghommit";
+
+        let github_repo = parse_github_push_url(url)
+            .expect(&format!("Unable to parse {:?}", url));
+
+        assert_eq!(github_repo.owner, "gemini-oss");
+        assert_eq!(github_repo.name, "ghommit");
+    }
+
+    #[test]
+    fn parse_github_https_url_with_creds() {
+        let url = "https://username:password@github.com/gemini-oss/ghommit";
 
         let github_repo = parse_github_push_url(url)
             .expect(&format!("Unable to parse {:?}", url));
