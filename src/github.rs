@@ -209,8 +209,9 @@ impl GitHubClient {
             Some(json) => request.json(&json),
             None => request
         };
+        let response = request.send();
 
-        match request.send() {
+        match response {
             Ok(response) => Ok(response),
             Err(e) => Err(format!("Request failed: {}", e)),
         }
