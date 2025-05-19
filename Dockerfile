@@ -8,9 +8,9 @@
 #   - The cargo profile being used (--release)
 #   - The build directory
 
-# - rust:1.86.0-bookworm for x86_64
-#   - https://hub.docker.com/layers/library/rust/1.86.0-bookworm/images/sha256-878ca0e8df1305dcbbfffac5bb908cce6a4bc5f6b629c518e7112645ee8851d4
-FROM rust@sha256:878ca0e8df1305dcbbfffac5bb908cce6a4bc5f6b629c518e7112645ee8851d4
+# - rust:1.87.0-bookworm for x86_64
+#   - https://hub.docker.com/layers/library/rust/1.87.0-bookworm/images/sha256-510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
+FROM rust@sha256:510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
 
 # - Install dependencies
 #   - minisign to verify Zig's signature
