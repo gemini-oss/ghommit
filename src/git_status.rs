@@ -63,7 +63,9 @@ pub fn git_status(repo: &Repository) -> Result<Vec<PathStatus>, String> {
 
         let object_type = match index.get_path(new_path, stage_number) {
             Some(index_entry) => {
-                match repo.find_object(index_entry.id, None) {
+                let object = repo.find_object(index_entry.id, None);
+
+                match object {
                     Ok(object) => object.kind(),
                     Err(_) => Err(format!("Unable to find object with ID {}", index_entry.id))?,
                 }

@@ -28,17 +28,32 @@ ghommit -m 'Adding to foo'
 #    that that git state is out of sync and may require syncing
 ```
 
-## Building
+## Building (basic)
 
 ```shell
-# One-time setup for cross-compilation
-cargo install cross
-
 # Building for the current machine
 cargo build --release
 
-# Building for Linux (x86_64)
-cross build --release --target=x86_64-unknown-linux-musl
+# One-time setup for cross-compilation
+cargo install cargo-zigbuild
+
+# - Building for Linux on x86_64
+rustup target add x86_64-unknown-linux-musl
+cargo zigbuild --release --target x86_64-unknown-linux-musl
+```
+
+## Building (reproducible)
+
+```sh
+# - Build a build container image
+podman build --platform linux/amd64 -t cargo-zigbuild:latest .
+
+# - Build a release binary for x86_64-unknown-linux-musl
+#   - The container assumes this repo will be mounted at /build
+podman run --platform linux/amd64 -v "${PWD}:/build" --rm cargo-zigbuild:latest
+
+# - Resultant executable will be located at
+#   target/x86_64-unknown-linux-musl/release/ghommit
 ```
 
 ## Testing
