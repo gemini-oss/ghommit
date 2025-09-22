@@ -20,7 +20,9 @@ RUN apt update && \
     apt install -y \
         minisign && \
     cargo install cargo-zigbuild --version 0.20.0 && \
-    rustup target add x86_64-unknown-linux-musl
+    rustup target add \
+        aarch64-unknown-linux-musl \
+        x86_64-unknown-linux-musl
 
 # - Zig: Set up environment variables
 #   - Note: Upgrading Zig will require changing not just environment variables,
@@ -78,5 +80,8 @@ RUN \
 # - Set SOURCE_DATE_EPOCH for reproducible builds
 ENV SOURCE_DATE_EPOCH='1715644800'
 
+# - Set the default target
+ENV TARGET_TRIPLE='x86_64-unknown-linux-musl'
+
 WORKDIR /build
-CMD ["cargo", "zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"]
+CMD ["/bin/sh", "-c", "cargo zigbuild --release --target ${TARGET_TRIPLE}"]
