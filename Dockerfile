@@ -10,7 +10,7 @@
 
 # - rust:1.87.0-bookworm for x86_64
 #   - https://hub.docker.com/layers/library/rust/1.87.0-bookworm/images/sha256-510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
-FROM rust@sha256:510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
+FROM docker.io/library/rust@sha256:510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
 
 # - Install dependencies
 #   - minisign to verify Zig's signature
