@@ -15,7 +15,7 @@ FROM --platform=linux/amd64 docker.io/library/rust@sha256:e026148c928f4e5e9dfbc0
 # - Install dependencies
 #   - minisign to verify Zig's signature
 #   - cargo-zigbuild to use Zig's linker with cargo
-#   - The x86_64-unknown-linux-musl target since it's not included by default
+#   - The supported build targets since it's not included by default
 RUN apt update && \
     apt install -y \
         minisign && \
