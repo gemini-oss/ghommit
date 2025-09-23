@@ -44,6 +44,8 @@ cargo zigbuild --release --target x86_64-unknown-linux-musl
 
 ## Building (reproducible)
 
+- Note: See [scripts/](scripts/) when updating the Dockerfile
+
 ```sh
 # - Build a build container image
 podman build -t cargo-zigbuild:latest .
