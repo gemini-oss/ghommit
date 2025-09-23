@@ -19,7 +19,7 @@ FROM --platform=linux/amd64 docker.io/library/rust@sha256:e026148c928f4e5e9dfbc0
 RUN apt update && \
     apt install -y \
         minisign && \
-    cargo install cargo-zigbuild --version 0.20.0 && \
+    cargo install cargo-zigbuild --version 0.20.1 && \
     rustup target add \
         aarch64-unknown-linux-musl \
         x86_64-unknown-linux-musl
