@@ -44,16 +44,21 @@ cargo zigbuild --release --target x86_64-unknown-linux-musl
 
 ## Building (reproducible)
 
+- Note: See [scripts/](scripts/) when updating the Dockerfile
+
 ```sh
 # - Build a build container image
-podman build --platform linux/amd64 -t cargo-zigbuild:latest .
+podman build -t cargo-zigbuild:latest .
+
+# - Build a release binary for aarch64-unknown-linux-musl
+#   - Resultant executable will be located at
+#     target/aarch64-unknown-linux-musl/release/ghommit
+podman run -e TARGET_TRIPLE=aarch64-unknown-linux-musl -v "$PWD:/build" --rm cargo-zigbuild:latest
 
 # - Build a release binary for x86_64-unknown-linux-musl
-#   - The container assumes this repo will be mounted at /build
-podman run --platform linux/amd64 -v "${PWD}:/build" --rm cargo-zigbuild:latest
-
-# - Resultant executable will be located at
-#   target/x86_64-unknown-linux-musl/release/ghommit
+#   - Resultant executable will be located at
+#     target/x86_64-unknown-linux-musl/release/ghommit
+podman run -e TARGET_TRIPLE=x86_64-unknown-linux-musl -v "$PWD:/build" --rm cargo-zigbuild:latest
 ```
 
 ## Testing

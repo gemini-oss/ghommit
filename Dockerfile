@@ -8,19 +8,21 @@
 #   - The cargo profile being used (--release)
 #   - The build directory
 
-# - rust:1.87.0-bookworm for x86_64
-#   - https://hub.docker.com/layers/library/rust/1.87.0-bookworm/images/sha256-510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
-FROM rust@sha256:510409508db9abe8be1f1bb6ca103bdea417564518c87b34494470c0cd322391
+# - rust:1.90.0-bookworm for x86_64
+#   - https://hub.docker.com/layers/library/rust/1.90.0-bookworm/images/sha256-e026148c928f4e5e9dfbc058c4ea189254de503926796bc473f9d2d25cc4690c
+FROM --platform=linux/amd64 docker.io/library/rust@sha256:e026148c928f4e5e9dfbc058c4ea189254de503926796bc473f9d2d25cc4690c
 
 # - Install dependencies
 #   - minisign to verify Zig's signature
 #   - cargo-zigbuild to use Zig's linker with cargo
-#   - The x86_64-unknown-linux-musl target since it's not included by default
+#   - The supported build targets since it's not included by default
 RUN apt update && \
     apt install -y \
         minisign && \
-    cargo install cargo-zigbuild --version 0.20.0 && \
-    rustup target add x86_64-unknown-linux-musl
+    cargo install cargo-zigbuild --version 0.20.1 && \
+    rustup target add \
+        aarch64-unknown-linux-musl \
+        x86_64-unknown-linux-musl
 
 # - Zig: Set up environment variables
 #   - Note: Upgrading Zig will require changing not just environment variables,
@@ -28,10 +30,10 @@ RUN apt update && \
 
 ENV ZIG_TEMP_DIR='/tmp/zig-setup'
 ENV ZIG_ARCHITECTURE='x86_64'
-ENV ZIG_VERSION='0.14.0'
+ENV ZIG_VERSION='0.15.1'
 
 ENV ZIG_PUBLIC_KEY_FILENAME='zig.minisign.pub'
-ENV ZIG_ARCHIVE_FILENAME="zig-linux-${ZIG_ARCHITECTURE}-${ZIG_VERSION}.tar.xz"
+ENV ZIG_ARCHIVE_FILENAME="zig-${ZIG_ARCHITECTURE}-linux-${ZIG_VERSION}.tar.xz"
 ENV ZIG_ARCHIVE_SIGNATURE_FILENAME="${ZIG_ARCHIVE_FILENAME}.minisig"
 ENV ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME="${ZIG_ARCHIVE_SIGNATURE_FILENAME}.base64"
 ENV ZIG_ARCHIVE_URL="https://ziglang.org/download/${ZIG_VERSION}/${ZIG_ARCHIVE_FILENAME}"
@@ -60,11 +62,11 @@ RUN \
     echo 'RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U' >> "${ZIG_PUBLIC_KEY_FILENAME}" && \
     \
     echo 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVT'  > "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
-    echo 'R09xMk5WZWNBMlFGZVlkLzNiOVpPN0NtMkNjSzZQT0cybFYzRHhSQzQ2MWdPa2JidzljOUxPcEsy' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
-    echo 'Y0MwUm1YVVBVK0toUm5sQllCVVJoRURRNjQyOHBWNE9iUVc5NWdjPQp0cnVzdGVkIGNvbW1lbnQ6' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
-    echo 'IHRpbWVzdGFtcDoxNzQxMTYwMDAzCWZpbGU6emlnLWxpbnV4LXg4Nl82NC0wLjE0LjAudGFyLnh6' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
-    echo 'CWhhc2hlZAoxbnVnN3lGT0huSjVtZG1qOEExeGpRVCtyd3VDc2Mxbi9paGNKWkxUQXF4aVEwSkUw' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
-    echo 'QWdHRFZQMjBoSFRCakVpays2VHl6aGJzTjFabTZyRWlqdFhEUT09Cg=='                     >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
+    echo 'R09xMk5WZWNBMldrM05wdzJJR3pJQzhmTWVjNllPRmlLUm8zRjd0bWFFZ2RWTDh3azA2YW1DQTY0' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
+    echo 'RnhvQzhpTjYrRnlsbFV6K21RdGVvT1hZbEVZRmtaWVVCRzJCbmdvPQp0cnVzdGVkIGNvbW1lbnQ6' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
+    echo 'IHRpbWVzdGFtcDoxNzU1NzA3MTIxCWZpbGU6emlnLXg4Nl82NC1saW51eC0wLjE1LjEudGFyLnh6' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
+    echo 'CWhhc2hlZAp5bnNsWmhpK3FNMG85VkZXZEVXajAvV3NuMXp1VzR1Ykh5STZhNEFlSlcyRGRMcTA0' >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
+    echo 'ZDBUUHVNTVdnbkZCS2N4ZmpoRmhCVW1hcXIxNTZkSWxJb0ZEQT09Cg=='                     >> "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" && \
     base64 -d < "${ZIG_ARCHIVE_SIGNATURE_BASE64_FILENAME}" > "${ZIG_ARCHIVE_SIGNATURE_FILENAME}" && \
     \
     curl -fsSL "${ZIG_ARCHIVE_URL}" -o "${ZIG_ARCHIVE_FILENAME}" && \
@@ -78,5 +80,8 @@ RUN \
 # - Set SOURCE_DATE_EPOCH for reproducible builds
 ENV SOURCE_DATE_EPOCH='1715644800'
 
+# - Set the default target
+ENV TARGET_TRIPLE='x86_64-unknown-linux-musl'
+
 WORKDIR /build
-CMD ["cargo", "zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"]
+CMD ["/bin/sh", "-c", "cargo zigbuild --release --target ${TARGET_TRIPLE}"]
